@@ -85,11 +85,9 @@
   onDestroy(clearSaveTimer);
 </script>
 
-<main
-  class="grid min-h-screen place-items-center bg-transparent p-5 text-white"
->
+<main class="grid min-h-screen place-items-center bg-transparent text-white">
   <section
-    class="drag-region grid w-full max-w-195 grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
+    class="drag-region grid h-full w-full grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
     aria-labelledby="app-title"
   >
     <div
