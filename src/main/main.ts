@@ -28,6 +28,7 @@ let settingsWindow: BrowserWindow | null = null;
 let promptWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let activeTimer: ActiveTimer | null = null;
+let trayCountdownInterval: NodeJS.Timeout | null = null;
 let isQuitting = false;
 
 let workState: WorkState = {
@@ -59,6 +60,24 @@ const clampDuration = (durationSeconds: number): number => {
 };
 
 const readWorkedSeconds = (dateKey = getTodayKey()): number => workState.dailyWork[dateKey]?.workedSeconds ?? 0;
+
+const formatCountdown = (totalSeconds: number): string => {
+  const seconds = Math.max(0, totalSeconds);
+  const minutesPart = Math.floor(seconds / 60);
+  const secondsPart = String(seconds % 60).padStart(2, "0");
+
+  return `${minutesPart}:${secondsPart}`;
+};
+
+const readActiveTimerRemainingSeconds = (): number => {
+  if (!activeTimer) {
+    return 0;
+  }
+
+  const endsAt = activeTimer.startedAt + activeTimer.durationSeconds * 1000;
+
+  return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+};
 
 const ensureDailyWork = (dateKey: string): DailyWork => {
   workState.dailyWork[dateKey] ??= { workedSeconds: 0 };
@@ -199,6 +218,7 @@ const beginWork = (): void => {
   };
 
   closePromptWindow();
+  startTrayCountdown();
   updateTrayMenu();
 };
 
@@ -209,6 +229,7 @@ const finishWork = async (): Promise<void> => {
 
   const finishedTimer = activeTimer;
   activeTimer = null;
+  stopTrayCountdown();
 
   addWorkedPeriod(finishedTimer.startedAt, finishedTimer.durationSeconds);
   await saveWorkState();
@@ -242,12 +263,19 @@ const updateTrayMenu = (): void => {
   }
 
   const todayMinutes = Math.floor(readWorkedSeconds() / 60);
+  const remainingSeconds = readActiveTimerRemainingSeconds();
+  const countdownLabel = formatCountdown(remainingSeconds);
 
-  tray.setToolTip(`I Am Working - 今日已工作 ${todayMinutes} 分钟`);
+  tray.setTitle(activeTimer ? countdownLabel : "");
+  tray.setToolTip(
+    activeTimer
+      ? `I Am Working - 本轮剩余 ${countdownLabel}，今日已工作 ${todayMinutes} 分钟`
+      : `I Am Working - 今日已工作 ${todayMinutes} 分钟`
+  );
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: activeTimer ? "工作中..." : "显示提示",
+        label: activeTimer ? `工作中 ${countdownLabel}` : "显示提示",
         enabled: !activeTimer,
         click: showPromptWindow
       },
@@ -265,6 +293,23 @@ const updateTrayMenu = (): void => {
       }
     ])
   );
+};
+
+const startTrayCountdown = (): void => {
+  if (trayCountdownInterval) {
+    return;
+  }
+
+  trayCountdownInterval = setInterval(updateTrayMenu, 1000);
+};
+
+const stopTrayCountdown = (): void => {
+  if (!trayCountdownInterval) {
+    return;
+  }
+
+  clearInterval(trayCountdownInterval);
+  trayCountdownInterval = null;
 };
 
 const createTray = (): void => {
@@ -350,6 +395,8 @@ app.on("before-quit", () => {
     clearTimeout(activeTimer.timeoutId);
     activeTimer = null;
   }
+
+  stopTrayCountdown();
 });
 
 app.on("window-all-closed", () => {
