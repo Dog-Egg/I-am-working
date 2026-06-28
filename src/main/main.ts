@@ -101,8 +101,15 @@ const ensureDailyWork = (dateKey: string): DailyWork => {
 };
 
 const loadWorkState = async (): Promise<void> => {
+  const filePath = getStateFilePath();
+
   try {
-    const fileContent = await readFile(getStateFilePath(), "utf8");
+    const fileContent = await readFile(filePath, "utf8");
+
+    console.log(
+      `[IO ${new Date().toISOString()}] READ ${filePath} (${Buffer.byteLength(fileContent, "utf8")} bytes)`,
+    );
+
     const storedState = JSON.parse(fileContent) as Partial<WorkState>;
 
     workState = {
@@ -115,7 +122,11 @@ const loadWorkState = async (): Promise<void> => {
       dailyWork: storedState.dailyWork ?? {},
     };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      console.log(
+        `[IO ${new Date().toISOString()}] READ ${filePath} (not found, using defaults)`,
+      );
+    } else {
       console.error("Failed to load work state:", error);
     }
   }
@@ -123,9 +134,14 @@ const loadWorkState = async (): Promise<void> => {
 
 const saveWorkState = async (): Promise<void> => {
   const filePath = getStateFilePath();
+  const serialized = `${JSON.stringify(workState, null, 2)}\n`;
 
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(workState, null, 2)}\n`, "utf8");
+  await writeFile(filePath, serialized, "utf8");
+
+  console.log(
+    `[IO ${new Date().toISOString()}] WRITE ${filePath} (${Buffer.byteLength(serialized, "utf8")} bytes)`,
+  );
 };
 
 const addWorkedPeriod = (startedAt: number, durationSeconds: number): void => {
