@@ -20,12 +20,14 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
     "prettier": "3.9.1",
+    "prettier-plugin-svelte": "^4.1.1",
+    "prettier-plugin-tailwindcss": "^0.0.0-insiders.fc3a063",
     "svelte": "^5.56.4",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "vite": "^7.3.6"
   },
   "lint-staged": {
-    "*.{js,css,md}": "prettier --write"
+    "*": "prettier --write --ignore-unknown"
   }
 }
