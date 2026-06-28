@@ -3,19 +3,19 @@
   import TimeDial from "./components/TimeDial.svelte";
 
   let buttonLabel = "开始工作";
-  let durationMinutes = 25;
-  let savedMinutes = 25;
+  let durationSeconds = 1500;
+  let savedSeconds = 1500;
   let todayWorkedSeconds = 0;
   let isReady = false;
   let isSaving = false;
   let saveTimer: ReturnType<typeof window.setTimeout> | null = null;
 
-  const toMinutes = (durationSeconds: number): number => {
+  const toSeconds = (durationSeconds: number): number => {
     if (!Number.isFinite(durationSeconds)) {
-      return 25;
+      return 1500;
     }
 
-    return Math.min(60, Math.max(1, Math.round(durationSeconds / 60)));
+    return Math.min(3600, Math.max(1, Math.round(durationSeconds)));
   };
 
   const formatWorkedTime = (totalSeconds: number): string => {
@@ -35,17 +35,17 @@
   const saveDuration = async (): Promise<void> => {
     clearSaveTimer();
 
-    if (durationMinutes === savedMinutes) {
+    if (durationSeconds === savedSeconds) {
       return;
     }
 
     isSaving = true;
 
     try {
-      const state = await window.workApi.saveDuration(durationMinutes * 60);
+      const state = await window.workApi.saveDuration(durationSeconds);
 
-      savedMinutes = toMinutes(state.durationSeconds);
-      durationMinutes = savedMinutes;
+      savedSeconds = toSeconds(state.durationSeconds);
+      durationSeconds = savedSeconds;
       todayWorkedSeconds = state.todayWorkedSeconds;
     } finally {
       isSaving = false;
@@ -63,8 +63,8 @@
     const state = await window.workApi.getState();
 
     buttonLabel = state.buttonLabel;
-    durationMinutes = toMinutes(state.durationSeconds);
-    savedMinutes = durationMinutes;
+    durationSeconds = toSeconds(state.durationSeconds);
+    savedSeconds = durationSeconds;
     todayWorkedSeconds = state.todayWorkedSeconds;
     isReady = true;
   };
@@ -74,7 +74,7 @@
     window.workApi.startWork();
   };
 
-  $: if (isReady && durationMinutes !== savedMinutes && !isSaving) {
+  $: if (isReady && durationSeconds !== savedSeconds && !isSaving) {
     scheduleSaveDuration();
   }
 
@@ -136,9 +136,9 @@
 
     <div class="grid content-center gap-6">
       <TimeDial
-        bind:value={durationMinutes}
+        bind:value={durationSeconds}
         min={1}
-        max={60}
+        max={3600}
         disabled={isSaving}
       />
 

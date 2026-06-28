@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } from "electron";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import * as path from "path";
 
-const MIN_SECONDS = 60;
+const MIN_SECONDS = 1;
 const MAX_SECONDS = 60 * 60;
 const DEFAULT_SECONDS = 25 * 60;
 

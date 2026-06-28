@@ -1,7 +1,7 @@
 <script lang="ts">
-  export let value = 25;
+  export let value = 1500;
   export let min = 1;
-  export let max = 60;
+  export let max = 3600;
   export let disabled = false;
 
   const size = 320;
@@ -15,12 +15,49 @@
   let prevAngle: number | null = null;
   let accAngle = 0;
 
-  $: normalized = max === min ? 0 : (value - min) / (max - min);
-  $: progress = Math.min(1, Math.max(0, normalized));
+  // 线性分段：1 分钟（60 秒）占表盘 1/12（30°），其余 11/12 给 1 分钟到 60 分钟
+  const BREAKPOINT_PROGRESS = 1 / 12;
+  const BREAKPOINT_VALUE = 60;
+
+  const progressToValue = (progress: number): number => {
+    if (progress <= BREAKPOINT_PROGRESS) {
+      return min + (progress / BREAKPOINT_PROGRESS) * (BREAKPOINT_VALUE - min);
+    }
+    const t = (progress - BREAKPOINT_PROGRESS) / (1 - BREAKPOINT_PROGRESS);
+    return BREAKPOINT_VALUE + t * (max - BREAKPOINT_VALUE);
+  };
+
+  const valueToProgress = (nextValue: number): number => {
+    if (nextValue <= min) return 0;
+    if (nextValue >= max) return 1;
+    if (nextValue <= BREAKPOINT_VALUE) {
+      return (
+        ((nextValue - min) / (BREAKPOINT_VALUE - min)) * BREAKPOINT_PROGRESS
+      );
+    }
+    return (
+      BREAKPOINT_PROGRESS +
+      ((nextValue - BREAKPOINT_VALUE) / (max - BREAKPOINT_VALUE)) *
+        (1 - BREAKPOINT_PROGRESS)
+    );
+  };
+
+  // 分段吸附：<1 分钟按 1 秒一步，>=1 分钟按 60 秒一步
+  const snapToStep = (nextValue: number): number => {
+    if (nextValue < BREAKPOINT_VALUE) {
+      return Math.round(nextValue);
+    }
+    const step = 60;
+    return Math.round(nextValue / step) * step;
+  };
+
+  $: progress = Math.min(1, Math.max(0, valueToProgress(value)));
   $: dashOffset = circumference * (1 - progress);
   $: knobAngle = -90 + progress * 360;
   $: knobX = center + Math.cos((knobAngle * Math.PI) / 180) * radius;
   $: knobY = center + Math.sin((knobAngle * Math.PI) / 180) * radius;
+  $: displayMinutes = Math.floor(value / 60);
+  $: displaySeconds = value % 60;
 
   const clamp = (nextValue: number): number =>
     Math.min(max, Math.max(min, nextValue));
@@ -44,7 +81,7 @@
     }
     prevAngle = normalizedAngle;
 
-    const nextValue = min + Math.round((accAngle / 360) * (max - min));
+    const nextValue = snapToStep(progressToValue(accAngle / 360));
     value = clamp(nextValue);
   };
 
@@ -61,7 +98,7 @@
     isDragging = true;
     dialElement.setPointerCapture(event.pointerId);
     prevAngle = null;
-    accAngle = ((value - min) / (max - min)) * 360;
+    accAngle = valueToProgress(value) * 360;
     setValueFromPointer(event);
   };
 
@@ -78,6 +115,10 @@
       dialElement.releasePointerCapture(event.pointerId);
     }
   };
+
+  // 键盘步进：按当前值 5% 增减，自然形成非线性步距
+  const keyboardStep = (currentValue: number): number =>
+    Math.max(1, Math.round(currentValue * 0.05));
 </script>
 
 <div
@@ -101,12 +142,12 @@
 
     if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
       event.preventDefault();
-      value = clamp(value - 1);
+      value = clamp(value - keyboardStep(value));
     }
 
     if (event.key === "ArrowRight" || event.key === "ArrowUp") {
       event.preventDefault();
-      value = clamp(value + 1);
+      value = clamp(value + keyboardStep(value));
     }
   }}
 >
@@ -204,7 +245,9 @@
       <div
         class="text-[clamp(58px,10vw,75px)] leading-none font-black tracking-normal text-white [font-variant-numeric:tabular-nums]"
       >
-        {String(value).padStart(2, "0")}:00
+        {String(displayMinutes).padStart(2, "0")}:{String(
+          displaySeconds,
+        ).padStart(2, "0")}
       </div>
     </div>
   </div>
