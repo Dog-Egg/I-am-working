@@ -1,0 +1,77 @@
+:root {
+  color: #17211b;
+  background: #fffdf8;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+.prompt-shell {
+  min-height: 100vh;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  padding: 28px;
+  border-top: 5px solid #1e6b5d;
+  background:
+    linear-gradient(135deg, rgba(30, 107, 93, 0.1), transparent 44%),
+    #fffdf8;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #587168;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+h1 {
+  margin: 0;
+  color: #10382e;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.message {
+  margin: 0 0 8px;
+  color: #4d5d56;
+  font-size: 16px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.actions button {
+  min-height: 44px;
+  border-radius: 6px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.secondary-button {
+  border: 1px solid #cfc7b8;
+  color: #33413b;
+  background: #fffdf8;
+}
+
+.primary-button {
+  border: 0;
+  color: #fffdf8;
+  background: #1e6b5d;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "i-am-working",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc && cp src/index.html src/styles.css src/prompt.html src/prompt.css dist/",
+    "start": "npm run build && electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^42.5.0",
+    "typescript": "^6.0.3"
+  }
+}

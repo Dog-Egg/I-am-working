@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>I Am Working</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="timer-panel" aria-labelledby="app-title">
+        <div>
+          <p class="eyebrow">工作计时</p>
+          <h1 id="app-title">I Am Working</h1>
+        </div>
+
+        <div id="display" class="timer-display" aria-live="polite">25:00</div>
+
+        <form id="timer-form" class="timer-form">
+          <label class="field">
+            <span>时长</span>
+            <input id="amount" type="number" min="0.0002777778" step="any" value="25" required />
+          </label>
+
+          <label class="field">
+            <span>单位</span>
+            <select id="unit">
+              <option value="seconds">秒</option>
+              <option value="minutes" selected>分钟</option>
+              <option value="hours">小时</option>
+            </select>
+          </label>
+
+          <button id="start-button" type="submit">开始工作</button>
+        </form>
+
+        <p id="status" class="status">请输入 1 秒到 1 小时之间的时间。</p>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
