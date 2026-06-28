@@ -1,9 +1,9 @@
 {
   "name": "i-am-working",
   "version": "1.0.0",
-  "main": "dist/main.js",
+  "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc && cp src/index.html src/styles.css src/prompt.html src/prompt.css dist/",
+    "build": "tsc -p tsconfig.electron.json && vite build",
     "start": "npm run build && electron ."
   },
   "keywords": [],
@@ -11,7 +11,12 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.3.1",
     "electron": "^42.5.0",
-    "typescript": "^6.0.3"
+    "svelte": "^5.56.4",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0"
   }
 }

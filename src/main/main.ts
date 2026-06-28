@@ -17,7 +17,7 @@ const showContinuePrompt = (parentWindow: BrowserWindow): Promise<boolean> => {
       alwaysOnTop: true,
       autoHideMenuBar: true,
       webPreferences: {
-        preload: path.join(__dirname, "prompt-preload.js"),
+        preload: path.join(__dirname, "..", "preload", "prompt-preload.js"),
         contextIsolation: true,
         nodeIntegration: false
       }
@@ -56,7 +56,7 @@ const showContinuePrompt = (parentWindow: BrowserWindow): Promise<boolean> => {
       promptWindow.focus();
     });
 
-    void promptWindow.loadFile(path.join(__dirname, "prompt.html"));
+    void promptWindow.loadFile(path.join(__dirname, "..", "renderer", "prompt.html"));
   });
 };
 
@@ -67,13 +67,13 @@ const createWindow = (): void => {
     minWidth: 420,
     minHeight: 360,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "..", "preload", "app-preload.js"),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
 
-  void mainWindow.loadFile(path.join(__dirname, "index.html"));
+  void mainWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 };
 
 app.whenReady().then(() => {
