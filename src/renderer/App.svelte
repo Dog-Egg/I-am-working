@@ -21,8 +21,9 @@
   const formatWorkedTime = (totalSeconds: number): string => {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
 
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   };
 
   const clearSaveTimer = (): void => {
@@ -117,7 +118,7 @@
       </div>
       <p class="m-0 text-[23px] font-bold text-white/82">今日已工作</p>
       <p
-        class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] leading-none font-black tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
+        class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[40px] leading-none font-black tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
       >
         {formatWorkedTime(todayWorkedSeconds)}
       </p>
