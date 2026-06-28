@@ -1,64 +1,155 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
+  import TimeDial from "./components/TimeDial.svelte";
 
   let buttonLabel = "开始工作";
-  let durationSeconds = 25 * 60;
+  let durationMinutes = 25;
+  let savedMinutes = 25;
   let todayWorkedSeconds = 0;
+  let isReady = false;
+  let isSaving = false;
+  let saveTimer: ReturnType<typeof window.setTimeout> | null = null;
 
-  const formatDuration = (totalSeconds: number): string => {
+  const toMinutes = (durationSeconds: number): number => {
+    if (!Number.isFinite(durationSeconds)) {
+      return 25;
+    }
+
+    return Math.min(60, Math.max(1, Math.round(durationSeconds / 60)));
+  };
+
+  const formatWorkedTime = (totalSeconds: number): string => {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    const parts: string[] = [];
 
-    if (hours > 0) {
-      parts.push(`${hours} 小时`);
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  };
+
+  const clearSaveTimer = (): void => {
+    if (saveTimer) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+  };
+
+  const saveDuration = async (): Promise<void> => {
+    clearSaveTimer();
+
+    if (durationMinutes === savedMinutes) {
+      return;
     }
 
-    if (minutes > 0) {
-      parts.push(`${minutes} 分钟`);
-    }
+    isSaving = true;
 
-    if (seconds > 0 || parts.length === 0) {
-      parts.push(`${seconds} 秒`);
-    }
+    try {
+      const state = await window.workPrompt.saveDuration(durationMinutes * 60);
 
-    return parts.join(" ");
+      savedMinutes = toMinutes(state.durationSeconds);
+      durationMinutes = savedMinutes;
+      todayWorkedSeconds = state.todayWorkedSeconds;
+    } finally {
+      isSaving = false;
+    }
+  };
+
+  const scheduleSaveDuration = (): void => {
+    clearSaveTimer();
+    saveTimer = window.setTimeout(() => {
+      void saveDuration();
+    }, 250);
   };
 
   const loadState = async (): Promise<void> => {
     const state = await window.workPrompt.getState();
 
     buttonLabel = state.buttonLabel;
-    durationSeconds = state.durationSeconds;
+    durationMinutes = toMinutes(state.durationSeconds);
+    savedMinutes = durationMinutes;
     todayWorkedSeconds = state.todayWorkedSeconds;
+    isReady = true;
   };
 
-  const startWork = (): void => {
+  const startWork = async (): Promise<void> => {
+    await saveDuration();
     window.workPrompt.startWork();
   };
+
+  $: if (isReady && durationMinutes !== savedMinutes && !isSaving) {
+    scheduleSaveDuration();
+  }
 
   onMount(() => {
     void loadState();
   });
+
+  onDestroy(clearSaveTimer);
 </script>
 
 <main
-  class="grid min-h-screen place-items-center bg-transparent p-3 text-[#17211b]"
+  class="grid min-h-screen place-items-center bg-transparent p-5 text-white"
 >
-  <section class="drag-region grid w-full gap-3 bg-transparent">
-    <p class="m-0 text-[13px] font-extrabold text-[#587168]">工作提醒</p>
-    <h1 class="m-0 text-3xl font-bold leading-[1.1] text-[#10382e]">
-      I Am Working
-    </h1>
-    <div class="grid gap-1 text-[15px] font-bold text-[#4d5d56]">
-      <p class="m-0">今日已工作：{formatDuration(todayWorkedSeconds)}</p>
-      <p class="m-0">本轮时长：{formatDuration(durationSeconds)}</p>
+  <section
+    class="drag-region grid w-full max-w-195 grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
+    aria-labelledby="prompt-title"
+  >
+    <div class="grid content-between gap-5">
+      <div
+        class="rounded-[26px] border border-white/10 bg-white/5.5 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+      >
+        <div
+          class="mb-8 grid size-12 place-items-center rounded-full border-2 border-[#ff705c] text-[#ff705c]"
+        >
+          <svg class="size-7" viewBox="0 0 24 24" aria-hidden="true">
+            <circle
+              cx="12"
+              cy="12"
+              r="8"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+            />
+            <path
+              d="M12 7v5l4 3"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2.2"
+            />
+          </svg>
+        </div>
+        <p class="m-0 text-[23px] font-bold text-white/82">今日已工作时间</p>
+        <p
+          class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] font-black leading-none tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
+        >
+          {formatWorkedTime(todayWorkedSeconds)}
+        </p>
+
+        <div
+          class="mt-10 flex h-24 items-end gap-4 border-b border-white/10 pb-2"
+        >
+          {#each [42, 36, 58, 48, 78, 42, 30, 52] as height}
+            <span
+              class="block w-4 rounded-full bg-[linear-gradient(180deg,#ff735d,rgba(255,115,93,0.08))]"
+              style={`height: ${height}px`}
+            ></span>
+          {/each}
+        </div>
+      </div>
     </div>
-    <div class="grid">
+
+    <div class="grid content-center gap-6">
+      <TimeDial
+        bind:value={durationMinutes}
+        min={1}
+        max={60}
+        disabled={isSaving}
+      />
+
       <button
-        class="no-drag min-h-11 cursor-pointer rounded-md border-0 bg-[#1e6b5d] font-extrabold text-[#fffdf8]"
+        class="no-drag mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] font-black leading-none text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
         type="button"
+        disabled={isSaving}
         on:click={startWork}
       >
         {buttonLabel}

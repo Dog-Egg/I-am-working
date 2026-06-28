@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld("workPrompt", {
     durationSeconds: number;
     todayWorkedSeconds: number;
   }>,
+  saveDuration: (durationSeconds: number) => ipcRenderer.invoke("settings:save-duration", durationSeconds) as Promise<{
+    durationSeconds: number;
+    todayWorkedSeconds: number;
+  }>,
   startWork: () => {
     ipcRenderer.send("timer:start-work");
   }

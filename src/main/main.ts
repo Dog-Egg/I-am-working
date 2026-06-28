@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } from "electron";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import * as path from "path";
 
-const MIN_SECONDS = 1;
+const MIN_SECONDS = 60;
 const MAX_SECONDS = 60 * 60;
 const DEFAULT_SECONDS = 25 * 60;
 
@@ -24,7 +24,6 @@ type ActiveTimer = {
   timeoutId: NodeJS.Timeout;
 };
 
-let settingsWindow: BrowserWindow | null = null;
 let promptWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let activeTimer: ActiveTimer | null = null;
@@ -139,15 +138,6 @@ const getPromptState = () => {
   };
 };
 
-const showSettingsWindow = (): void => {
-  if (!settingsWindow || settingsWindow.isDestroyed()) {
-    createSettingsWindow();
-  }
-
-  settingsWindow?.show();
-  settingsWindow?.focus();
-};
-
 const closePromptWindow = (): void => {
   if (promptWindow && !promptWindow.isDestroyed()) {
     promptWindow.close();
@@ -167,15 +157,16 @@ const showPromptWindow = (): void => {
   }
 
   promptWindow = new BrowserWindow({
-    width: 380,
-    height: 230,
-    minWidth: 320,
-    minHeight: 190,
+    width: 820,
+    height: 620,
+    minWidth: 720,
+    minHeight: 540,
     resizable: true,
     maximizable: true,
     minimizable: false,
     title: "工作提醒",
     frame: false,
+    hasShadow: false,
     transparent: true,
     backgroundColor: "#00000000",
     show: false,
@@ -280,11 +271,6 @@ const updateTrayMenu = (): void => {
         click: showPromptWindow
       },
       {
-        label: "设置时间",
-        click: showSettingsWindow
-      },
-      { type: "separator" },
-      {
         label: "退出",
         click: () => {
           isQuitting = true;
@@ -315,50 +301,13 @@ const stopTrayCountdown = (): void => {
 const createTray = (): void => {
   tray = new Tray(createTrayIcon());
   tray.on("click", () => {
-    if (activeTimer) {
-      showSettingsWindow();
-      return;
-    }
-
     showPromptWindow();
   });
   updateTrayMenu();
 };
 
-const createSettingsWindow = (): void => {
-  settingsWindow = new BrowserWindow({
-    width: 520,
-    height: 420,
-    minWidth: 420,
-    minHeight: 360,
-    show: false,
-    title: "设置时间",
-    webPreferences: {
-      preload: path.join(__dirname, "..", "preload", "app-preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-
-  settingsWindow.on("close", (event) => {
-    if (isQuitting) {
-      return;
-    }
-
-    event.preventDefault();
-    settingsWindow?.hide();
-  });
-
-  void settingsWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-};
-
 app.whenReady().then(async () => {
   await loadWorkState();
-
-  ipcMain.handle("settings:get", () => ({
-    durationSeconds: workState.settings.durationSeconds,
-    todayWorkedSeconds: readWorkedSeconds()
-  }));
 
   ipcMain.handle("settings:save-duration", async (_event, durationSeconds: number) => {
     workState.settings.durationSeconds = clampDuration(durationSeconds);
@@ -379,12 +328,11 @@ app.whenReady().then(async () => {
     }
   });
 
-  createSettingsWindow();
   createTray();
   showPromptWindow();
 
   app.on("activate", () => {
-    showSettingsWindow();
+    showPromptWindow();
   });
 });
 
