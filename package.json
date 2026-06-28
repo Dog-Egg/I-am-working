@@ -6,6 +6,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "prepare": "husky install"
   },
   "keywords": [],
@@ -23,6 +24,7 @@
     "prettier-plugin-svelte": "^4.1.1",
     "prettier-plugin-tailwindcss": "^0.0.0-insiders.fc3a063",
     "svelte": "^5.56.4",
+    "svelte-check": "^4.7.1",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "vite": "^7.3.6"

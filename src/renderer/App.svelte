@@ -8,7 +8,7 @@
   let todayWorkedSeconds = 0;
   let isReady = false;
   let isSaving = false;
-  let saveTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let saveTimer: number | null = null;
 
   const toSeconds = (durationSeconds: number): number => {
     if (!Number.isFinite(durationSeconds)) {
