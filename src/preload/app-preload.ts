@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("workTimer", {
-  hideMainWindow: () => ipcRenderer.invoke("timer:hide-main-window") as Promise<void>,
-  showMainWindow: () => ipcRenderer.invoke("timer:show-main-window") as Promise<void>,
-  showContinuePrompt: () => ipcRenderer.invoke("timer:show-continue-prompt") as Promise<boolean>
+  getSettings: () => ipcRenderer.invoke("settings:get") as Promise<{
+    durationSeconds: number;
+    todayWorkedSeconds: number;
+  }>,
+  saveDuration: (durationSeconds: number) => ipcRenderer.invoke("settings:save-duration", durationSeconds) as Promise<{
+    durationSeconds: number;
+    todayWorkedSeconds: number;
+  }>
 });

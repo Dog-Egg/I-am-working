@@ -1,10 +1,20 @@
 interface Window {
   workTimer: {
-    hideMainWindow: () => Promise<void>;
-    showMainWindow: () => Promise<void>;
-    showContinuePrompt: () => Promise<boolean>;
+    getSettings: () => Promise<{
+      durationSeconds: number;
+      todayWorkedSeconds: number;
+    }>;
+    saveDuration: (durationSeconds: number) => Promise<{
+      durationSeconds: number;
+      todayWorkedSeconds: number;
+    }>;
   };
   workPrompt: {
-    respond: (shouldContinue: boolean) => void;
+    getState: () => Promise<{
+      buttonLabel: string;
+      durationSeconds: number;
+      todayWorkedSeconds: number;
+    }>;
+    startWork: () => void;
   };
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onMount } from "svelte";
 
   const MIN_SECONDS = 1;
   const MAX_SECONDS = 60 * 60;
@@ -9,11 +9,9 @@
 
   let amount = 25;
   let unit: TimeUnit = "minutes";
-  let selectedSeconds = DEFAULT_SECONDS;
-  let remainingSeconds = DEFAULT_SECONDS;
-  let isRunning = false;
+  let todayWorkedSeconds = 0;
   let statusText = "请输入 1 秒到 1 小时之间的时间。";
-  let intervalId: number | undefined;
+  let isSaving = false;
 
   const unitToSeconds = (selectedUnit: TimeUnit): number => {
     if (selectedUnit === "hours") {
@@ -27,16 +25,42 @@
     return 1;
   };
 
-  const formatTime = (totalSeconds: number): string => {
+  const formatDuration = (totalSeconds: number): string => {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
+    const parts: string[] = [];
 
     if (hours > 0) {
-      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      parts.push(`${hours} 小时`);
     }
 
-    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    if (minutes > 0) {
+      parts.push(`${minutes} 分钟`);
+    }
+
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds} 秒`);
+    }
+
+    return parts.join(" ");
+  };
+
+  const syncDurationInput = (durationSeconds: number): void => {
+    if (durationSeconds % 3600 === 0) {
+      amount = durationSeconds / 3600;
+      unit = "hours";
+      return;
+    }
+
+    if (durationSeconds % 60 === 0) {
+      amount = durationSeconds / 60;
+      unit = "minutes";
+      return;
+    }
+
+    amount = durationSeconds;
+    unit = "seconds";
   };
 
   const readDurationSeconds = (): number | null => {
@@ -53,48 +77,15 @@
     return totalSeconds;
   };
 
-  const stopTimer = (): void => {
-    if (intervalId !== undefined) {
-      window.clearInterval(intervalId);
-      intervalId = undefined;
-    }
+  const loadSettings = async (): Promise<void> => {
+    const settings = await window.workTimer.getSettings();
+
+    syncDurationInput(settings.durationSeconds);
+    todayWorkedSeconds = settings.todayWorkedSeconds;
+    statusText = `当前每轮 ${formatDuration(settings.durationSeconds)}。`;
   };
 
-  const finishTimer = async (): Promise<void> => {
-    stopTimer();
-    remainingSeconds = 0;
-
-    const shouldContinue = await window.workTimer.showContinuePrompt();
-
-    if (shouldContinue) {
-      startTimer(selectedSeconds);
-      return;
-    }
-
-    await window.workTimer.showMainWindow();
-    remainingSeconds = selectedSeconds;
-    isRunning = false;
-    statusText = "已停止，可以重新设置时间。";
-  };
-
-  const startTimer = (durationSeconds: number): void => {
-    stopTimer();
-    selectedSeconds = durationSeconds;
-    remainingSeconds = durationSeconds;
-    isRunning = true;
-    statusText = "正在工作...";
-    void window.workTimer.hideMainWindow();
-
-    intervalId = window.setInterval(() => {
-      remainingSeconds -= 1;
-
-      if (remainingSeconds <= 0) {
-        void finishTimer();
-      }
-    }, 1000);
-  };
-
-  const handleSubmit = (): void => {
+  const handleSubmit = async (): Promise<void> => {
     const durationSeconds = readDurationSeconds();
 
     if (durationSeconds === null) {
@@ -102,10 +93,22 @@
       return;
     }
 
-    startTimer(durationSeconds);
+    isSaving = true;
+
+    try {
+      const settings = await window.workTimer.saveDuration(durationSeconds);
+
+      syncDurationInput(settings.durationSeconds);
+      todayWorkedSeconds = settings.todayWorkedSeconds;
+      statusText = `已保存，每轮 ${formatDuration(settings.durationSeconds)}。`;
+    } finally {
+      isSaving = false;
+    }
   };
 
-  onDestroy(stopTimer);
+  onMount(() => {
+    void loadSettings();
+  });
 </script>
 
 <main
@@ -115,27 +118,28 @@
     <div>
       <p class="mb-1.5 text-[13px] font-bold text-[#587168]">工作计时</p>
       <h1 id="app-title" class="m-0 text-[34px] font-bold leading-[1.1] text-[#17211b]">
-        I Am Working
+        设置工作时间
       </h1>
     </div>
 
     <div
-      class="rounded-lg border border-[#d6d0c3] bg-white/70 px-5 py-7 text-center text-[64px] font-extrabold leading-none text-[#10382e] [font-variant-numeric:tabular-nums] max-[430px]:text-[52px]"
+      class="rounded-lg border border-[#d6d0c3] bg-white/70 px-5 py-7 text-center text-[30px] font-extrabold leading-tight text-[#10382e] [font-variant-numeric:tabular-nums]"
       aria-live="polite"
     >
-      {formatTime(remainingSeconds)}
+      <span class="block text-sm font-bold text-[#587168]">今日已工作</span>
+      {formatDuration(todayWorkedSeconds)}
     </div>
 
     <form class="grid grid-cols-[1fr_132px] gap-3.5 max-[430px]:grid-cols-1" on:submit|preventDefault={handleSubmit}>
       <label class="grid gap-2 text-sm font-bold text-[#4d5d56]">
-        <span>时长</span>
+        <span>每轮时长</span>
         <input
           class="min-h-[46px] w-full rounded-md border border-[#cfc7b8] bg-[#fffdf8] px-3 text-[#17211b] disabled:bg-[#ede7dc] disabled:text-[#748078]"
           type="number"
           min="0.0002777778"
           step="any"
           required
-          disabled={isRunning}
+          disabled={isSaving}
           bind:value={amount}
         />
       </label>
@@ -144,7 +148,7 @@
         <span>单位</span>
         <select
           class="min-h-[46px] w-full rounded-md border border-[#cfc7b8] bg-[#fffdf8] px-3 text-[#17211b] disabled:bg-[#ede7dc] disabled:text-[#748078]"
-          disabled={isRunning}
+          disabled={isSaving}
           bind:value={unit}
         >
           <option value="seconds">秒</option>
@@ -156,9 +160,9 @@
       <button
         class="col-span-full min-h-12 cursor-pointer rounded-md border-0 bg-[#1e6b5d] font-extrabold text-[#fffdf8] disabled:cursor-default disabled:bg-[#81918b]"
         type="submit"
-        disabled={isRunning}
+        disabled={isSaving}
       >
-        开始工作
+        保存设置
       </button>
     </form>
 
