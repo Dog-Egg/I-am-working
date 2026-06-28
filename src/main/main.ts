@@ -33,9 +33,9 @@ let isQuitting = false;
 let workState: WorkState = {
   version: 1,
   settings: {
-    durationSeconds: DEFAULT_SECONDS
+    durationSeconds: DEFAULT_SECONDS,
   },
-  dailyWork: {}
+  dailyWork: {},
 };
 
 const formatDateKey = (date: Date): string => {
@@ -48,17 +48,22 @@ const formatDateKey = (date: Date): string => {
 
 const getTodayKey = (): string => formatDateKey(new Date());
 
-const getStateFilePath = (): string => path.join(app.getPath("userData"), "work-state.json");
+const getStateFilePath = (): string =>
+  path.join(app.getPath("userData"), "work-state.json");
 
 const clampDuration = (durationSeconds: number): number => {
   if (!Number.isFinite(durationSeconds)) {
     return DEFAULT_SECONDS;
   }
 
-  return Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Math.round(durationSeconds)));
+  return Math.min(
+    MAX_SECONDS,
+    Math.max(MIN_SECONDS, Math.round(durationSeconds)),
+  );
 };
 
-const readWorkedSeconds = (dateKey = getTodayKey()): number => workState.dailyWork[dateKey]?.workedSeconds ?? 0;
+const readWorkedSeconds = (dateKey = getTodayKey()): number =>
+  workState.dailyWork[dateKey]?.workedSeconds ?? 0;
 
 const formatCountdown = (totalSeconds: number): string => {
   const seconds = Math.max(0, totalSeconds);
@@ -92,9 +97,11 @@ const loadWorkState = async (): Promise<void> => {
     workState = {
       version: 1,
       settings: {
-        durationSeconds: clampDuration(storedState.settings?.durationSeconds ?? DEFAULT_SECONDS)
+        durationSeconds: clampDuration(
+          storedState.settings?.durationSeconds ?? DEFAULT_SECONDS,
+        ),
       },
-      dailyWork: storedState.dailyWork ?? {}
+      dailyWork: storedState.dailyWork ?? {},
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -119,7 +126,10 @@ const addWorkedPeriod = (startedAt: number, durationSeconds: number): void => {
     const nextDay = new Date(cursor);
     nextDay.setHours(24, 0, 0, 0);
 
-    const secondsUntilNextDay = Math.max(1, Math.ceil((nextDay.getTime() - cursor.getTime()) / 1000));
+    const secondsUntilNextDay = Math.max(
+      1,
+      Math.ceil((nextDay.getTime() - cursor.getTime()) / 1000),
+    );
     const secondsToAdd = Math.min(remainingSeconds, secondsUntilNextDay);
 
     ensureDailyWork(dateKey).workedSeconds += secondsToAdd;
@@ -134,7 +144,7 @@ const getPromptState = () => {
   return {
     buttonLabel: todayWorkedSeconds === 0 ? "开始工作" : "继续工作",
     durationSeconds: workState.settings.durationSeconds,
-    todayWorkedSeconds
+    todayWorkedSeconds,
   };
 };
 
@@ -173,10 +183,10 @@ const showPromptWindow = (): void => {
     alwaysOnTop: true,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, "..", "preload", "prompt-preload.js"),
+      preload: path.join(__dirname, "..", "preload", "index.js"),
       contextIsolation: true,
-      nodeIntegration: false
-    }
+      nodeIntegration: false,
+    },
   });
 
   promptWindow.once("closed", () => {
@@ -189,7 +199,15 @@ const showPromptWindow = (): void => {
     promptWindow?.focus();
   });
 
-  void promptWindow.loadFile(path.join(__dirname, "..", "renderer", "prompt.html"));
+  const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
+
+  if (rendererUrl) {
+    void promptWindow.loadURL(`${rendererUrl}/prompt.html`);
+  } else {
+    void promptWindow.loadFile(
+      path.join(__dirname, "..", "renderer", "prompt.html"),
+    );
+  }
 };
 
 const beginWork = (): void => {
@@ -205,7 +223,7 @@ const beginWork = (): void => {
     startedAt,
     timeoutId: setTimeout(() => {
       void finishWork();
-    }, durationSeconds * 1000)
+    }, durationSeconds * 1000),
   };
 
   closePromptWindow();
@@ -261,23 +279,23 @@ const updateTrayMenu = (): void => {
   tray.setToolTip(
     activeTimer
       ? `I Am Working - 本轮剩余 ${countdownLabel}，今日已工作 ${todayMinutes} 分钟`
-      : `I Am Working - 今日已工作 ${todayMinutes} 分钟`
+      : `I Am Working - 今日已工作 ${todayMinutes} 分钟`,
   );
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
         label: activeTimer ? `工作中 ${countdownLabel}` : "显示提示",
         enabled: !activeTimer,
-        click: showPromptWindow
+        click: showPromptWindow,
       },
       {
         label: "退出",
         click: () => {
           isQuitting = true;
           app.quit();
-        }
-      }
-    ])
+        },
+      },
+    ]),
   );
 };
 
@@ -309,16 +327,19 @@ const createTray = (): void => {
 app.whenReady().then(async () => {
   await loadWorkState();
 
-  ipcMain.handle("settings:save-duration", async (_event, durationSeconds: number) => {
-    workState.settings.durationSeconds = clampDuration(durationSeconds);
-    await saveWorkState();
-    updateTrayMenu();
+  ipcMain.handle(
+    "settings:save-duration",
+    async (_event, durationSeconds: number) => {
+      workState.settings.durationSeconds = clampDuration(durationSeconds);
+      await saveWorkState();
+      updateTrayMenu();
 
-    return {
-      durationSeconds: workState.settings.durationSeconds,
-      todayWorkedSeconds: readWorkedSeconds()
-    };
-  });
+      return {
+        durationSeconds: workState.settings.durationSeconds,
+        todayWorkedSeconds: readWorkedSeconds(),
+      };
+    },
+  );
 
   ipcMain.handle("timer:get-prompt-state", getPromptState);
 
