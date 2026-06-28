@@ -42,7 +42,7 @@
     isSaving = true;
 
     try {
-      const state = await window.workPrompt.saveDuration(durationMinutes * 60);
+      const state = await window.workApi.saveDuration(durationMinutes * 60);
 
       savedMinutes = toMinutes(state.durationSeconds);
       durationMinutes = savedMinutes;
@@ -60,7 +60,7 @@
   };
 
   const loadState = async (): Promise<void> => {
-    const state = await window.workPrompt.getState();
+    const state = await window.workApi.getState();
 
     buttonLabel = state.buttonLabel;
     durationMinutes = toMinutes(state.durationSeconds);
@@ -71,7 +71,7 @@
 
   const startWork = async (): Promise<void> => {
     await saveDuration();
-    window.workPrompt.startWork();
+    window.workApi.startWork();
   };
 
   $: if (isReady && durationMinutes !== savedMinutes && !isSaving) {
@@ -90,7 +90,7 @@
 >
   <section
     class="drag-region grid w-full max-w-195 grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
-    aria-labelledby="prompt-title"
+    aria-labelledby="app-title"
   >
     <div
       class="flex flex-col rounded-[26px] border border-white/10 bg-white/5.5 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
@@ -119,7 +119,7 @@
       </div>
       <p class="m-0 text-[23px] font-bold text-white/82">今日已工作</p>
       <p
-        class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] font-black leading-none tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
+        class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] leading-none font-black tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
       >
         {formatWorkedTime(todayWorkedSeconds)}
       </p>
@@ -145,7 +145,7 @@
       />
 
       <button
-        class="no-drag mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] font-black leading-none text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
+        class="no-drag mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] leading-none font-black text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
         type="button"
         disabled={isSaving}
         on:click={startWork}
@@ -159,7 +159,7 @@
 <style>
   :global(html),
   :global(body),
-  :global(#prompt) {
+  :global(#app) {
     background: transparent;
   }
 

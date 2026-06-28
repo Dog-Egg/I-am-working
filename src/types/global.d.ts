@@ -1,5 +1,5 @@
 interface Window {
-  workPrompt: {
+  workApi: {
     getState: () => Promise<{
       buttonLabel: string;
       durationSeconds: number;

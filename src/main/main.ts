@@ -24,7 +24,7 @@ type ActiveTimer = {
   timeoutId: NodeJS.Timeout;
 };
 
-let promptWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let activeTimer: ActiveTimer | null = null;
 let trayCountdownInterval: NodeJS.Timeout | null = null;
@@ -138,7 +138,7 @@ const addWorkedPeriod = (startedAt: number, durationSeconds: number): void => {
   }
 };
 
-const getPromptState = () => {
+const getState = () => {
   const todayWorkedSeconds = readWorkedSeconds();
 
   return {
@@ -148,25 +148,25 @@ const getPromptState = () => {
   };
 };
 
-const closePromptWindow = (): void => {
-  if (promptWindow && !promptWindow.isDestroyed()) {
-    promptWindow.close();
+const closeMainWindow = (): void => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.close();
   }
 };
 
-const showPromptWindow = (): void => {
+const showMainWindow = (): void => {
   if (activeTimer) {
     return;
   }
 
-  if (promptWindow && !promptWindow.isDestroyed()) {
-    promptWindow.setAlwaysOnTop(true, "screen-saver");
-    promptWindow.show();
-    promptWindow.focus();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(true, "screen-saver");
+    mainWindow.show();
+    mainWindow.focus();
     return;
   }
 
-  promptWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 820,
     height: 620,
     minWidth: 720,
@@ -189,23 +189,23 @@ const showPromptWindow = (): void => {
     },
   });
 
-  promptWindow.once("closed", () => {
-    promptWindow = null;
+  mainWindow.once("closed", () => {
+    mainWindow = null;
   });
 
-  promptWindow.once("ready-to-show", () => {
-    promptWindow?.setAlwaysOnTop(true, "screen-saver");
-    promptWindow?.show();
-    promptWindow?.focus();
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.setAlwaysOnTop(true, "screen-saver");
+    mainWindow?.show();
+    mainWindow?.focus();
   });
 
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
 
   if (rendererUrl) {
-    void promptWindow.loadURL(`${rendererUrl}/prompt.html`);
+    void mainWindow.loadURL(`${rendererUrl}/index.html`);
   } else {
-    void promptWindow.loadFile(
-      path.join(__dirname, "..", "renderer", "prompt.html"),
+    void mainWindow.loadFile(
+      path.join(__dirname, "..", "renderer", "index.html"),
     );
   }
 };
@@ -226,7 +226,7 @@ const beginWork = (): void => {
     }, durationSeconds * 1000),
   };
 
-  closePromptWindow();
+  closeMainWindow();
   startTrayCountdown();
   updateTrayMenu();
 };
@@ -243,7 +243,7 @@ const finishWork = async (): Promise<void> => {
   addWorkedPeriod(finishedTimer.startedAt, finishedTimer.durationSeconds);
   await saveWorkState();
   updateTrayMenu();
-  showPromptWindow();
+  showMainWindow();
 };
 
 const createTrayIcon = (): Electron.NativeImage => {
@@ -286,7 +286,7 @@ const updateTrayMenu = (): void => {
       {
         label: activeTimer ? `工作中 ${countdownLabel}` : "显示提示",
         enabled: !activeTimer,
-        click: showPromptWindow,
+        click: showMainWindow,
       },
       {
         label: "退出",
@@ -319,7 +319,7 @@ const stopTrayCountdown = (): void => {
 const createTray = (): void => {
   tray = new Tray(createTrayIcon());
   tray.on("click", () => {
-    showPromptWindow();
+    showMainWindow();
   });
   updateTrayMenu();
 };
@@ -341,19 +341,19 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle("timer:get-prompt-state", getPromptState);
+  ipcMain.handle("timer:get-state", getState);
 
   ipcMain.on("timer:start-work", (event) => {
-    if (promptWindow?.webContents === event.sender) {
+    if (mainWindow?.webContents === event.sender) {
       beginWork();
     }
   });
 
   createTray();
-  showPromptWindow();
+  showMainWindow();
 
   app.on("activate", () => {
-    showPromptWindow();
+    showMainWindow();
   });
 });
 
