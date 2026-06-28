@@ -12,6 +12,8 @@
 
   let dialElement: HTMLDivElement;
   let isDragging = false;
+  let prevAngle: number | null = null;
+  let accAngle = 0;
 
   $: normalized = max === min ? 0 : (value - min) / (max - min);
   $: progress = Math.min(1, Math.max(0, normalized));
@@ -33,8 +35,16 @@
     const y = event.clientY - rect.top - rect.height / 2;
     const angle = Math.atan2(y, x) * (180 / Math.PI);
     const normalizedAngle = (angle + 90 + 360) % 360;
-    const nextValue = min + Math.round((normalizedAngle / 360) * (max - min));
 
+    if (prevAngle !== null) {
+      let delta = normalizedAngle - prevAngle;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      accAngle = Math.min(360, Math.max(0, accAngle + delta));
+    }
+    prevAngle = normalizedAngle;
+
+    const nextValue = min + Math.round((accAngle / 360) * (max - min));
     value = clamp(nextValue);
   };
 
@@ -43,8 +53,15 @@
       return;
     }
 
+    const target = event.target as Element | null;
+    if (!target || !target.hasAttribute("data-knob")) {
+      return;
+    }
+
     isDragging = true;
     dialElement.setPointerCapture(event.pointerId);
+    prevAngle = null;
+    accAngle = ((value - min) / (max - min)) * 360;
     setValueFromPointer(event);
   };
 
@@ -64,7 +81,7 @@
 </script>
 
 <div
-  class="time-dial no-drag relative mx-auto aspect-square w-full max-w-[360px] select-none touch-none"
+  class="time-dial no-drag relative mx-auto aspect-square w-full max-w-[360px] touch-none select-none"
   class:opacity-70={disabled}
   bind:this={dialElement}
   role="slider"
@@ -166,13 +183,17 @@
       stroke-dashoffset={dashOffset}
       transform={`rotate(-90 ${center} ${center})`}
     />
+
+    <!-- handler -->
     <circle
+      data-knob
       cx={knobX}
       cy={knobY}
       r="17"
       fill="#fffaf2"
       stroke="#ff6a52"
       stroke-width="7"
+      style={`cursor: ${disabled ? "not-allowed" : isDragging ? "grabbing" : "grab"};`}
     />
   </svg>
 
@@ -181,7 +202,7 @@
   >
     <div>
       <div
-        class="text-[clamp(58px,10vw,86px)] font-black leading-none tracking-normal text-white [font-variant-numeric:tabular-nums]"
+        class="text-[clamp(58px,10vw,75px)] leading-none font-black tracking-normal text-white [font-variant-numeric:tabular-nums]"
       >
         {String(value).padStart(2, "0")}:00
       </div>
