@@ -351,6 +351,7 @@ const createTray = (): void => {
 };
 
 app.whenReady().then(async () => {
+  app.setActivationPolicy("accessory");
   await loadWorkState();
 
   ipcMain.handle(
