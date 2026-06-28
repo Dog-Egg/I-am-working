@@ -71,6 +71,7 @@
       return;
     }
 
+    await window.workTimer.showMainWindow();
     remainingSeconds = selectedSeconds;
     isRunning = false;
     statusText = "已停止，可以重新设置时间。";
@@ -82,6 +83,7 @@
     remainingSeconds = durationSeconds;
     isRunning = true;
     statusText = "正在工作...";
+    void window.workTimer.hideMainWindow();
 
     intervalId = window.setInterval(() => {
       remainingSeconds -= 1;

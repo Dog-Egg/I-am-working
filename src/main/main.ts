@@ -4,6 +4,7 @@ import * as path from "path";
 const showContinuePrompt = (parentWindow: BrowserWindow): Promise<boolean> => {
   return new Promise((resolve) => {
     let isSettled = false;
+    const parentOptions = parentWindow.isVisible() ? { parent: parentWindow, modal: true } : {};
 
     const promptWindow = new BrowserWindow({
       width: 380,
@@ -12,10 +13,9 @@ const showContinuePrompt = (parentWindow: BrowserWindow): Promise<boolean> => {
       maximizable: false,
       minimizable: false,
       title: "时间到了",
-      parent: parentWindow,
-      modal: true,
       alwaysOnTop: true,
       autoHideMenuBar: true,
+      ...parentOptions,
       webPreferences: {
         preload: path.join(__dirname, "..", "preload", "prompt-preload.js"),
         contextIsolation: true,
@@ -77,6 +77,21 @@ const createWindow = (): void => {
 };
 
 app.whenReady().then(() => {
+  ipcMain.handle("timer:hide-main-window", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.hide();
+  });
+
+  ipcMain.handle("timer:show-main-window", (event) => {
+    const mainWindow = BrowserWindow.fromWebContents(event.sender);
+
+    if (!mainWindow) {
+      return;
+    }
+
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
   ipcMain.handle("timer:show-continue-prompt", (event) => {
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
 
