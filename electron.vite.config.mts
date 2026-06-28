@@ -1,12 +1,12 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
-import { externalizeDepsPlugin, defineConfig } from "electron-vite";
+import { defineConfig } from "electron-vite";
 import { resolve } from "path";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/main.ts"),
@@ -15,8 +15,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/preload/index.ts"),
