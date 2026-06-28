@@ -5,9 +5,37 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "pkg:mac": "electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "start": "electron-vite preview",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "prepare": "husky install"
+  },
+  "build": {
+    "appId": "com.iamworking.app",
+    "productName": "I Am Working",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   },
   "keywords": [],
   "author": "",
@@ -17,6 +45,7 @@
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tailwindcss/vite": "^4.3.1",
     "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",

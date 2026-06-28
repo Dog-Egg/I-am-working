@@ -28,7 +28,7 @@ export default defineConfig({
     root: "src/renderer",
     base: "./",
     build: {
-      outDir: "../../out/renderer",
+      outDir: resolve(__dirname, "out/renderer"),
       emptyOutDir: true,
       rollupOptions: {
         input: {
