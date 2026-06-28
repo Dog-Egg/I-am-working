@@ -92,49 +92,47 @@
     class="drag-region grid w-full max-w-195 grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
     aria-labelledby="prompt-title"
   >
-    <div class="grid content-between gap-5">
+    <div
+      class="flex flex-col rounded-[26px] border border-white/10 bg-white/5.5 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+    >
       <div
-        class="rounded-[26px] border border-white/10 bg-white/5.5 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+        class="mb-8 grid size-12 place-items-center rounded-full border-2 border-[#ff705c] text-[#ff705c]"
       >
-        <div
-          class="mb-8 grid size-12 place-items-center rounded-full border-2 border-[#ff705c] text-[#ff705c]"
-        >
-          <svg class="size-7" viewBox="0 0 24 24" aria-hidden="true">
-            <circle
-              cx="12"
-              cy="12"
-              r="8"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.2"
-            />
-            <path
-              d="M12 7v5l4 3"
-              fill="none"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2.2"
-            />
-          </svg>
-        </div>
-        <p class="m-0 text-[23px] font-bold text-white/82">今日已工作时间</p>
-        <p
-          class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] font-black leading-none tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
-        >
-          {formatWorkedTime(todayWorkedSeconds)}
-        </p>
+        <svg class="size-7" viewBox="0 0 24 24" aria-hidden="true">
+          <circle
+            cx="12"
+            cy="12"
+            r="8"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+          />
+          <path
+            d="M12 7v5l4 3"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2.2"
+          />
+        </svg>
+      </div>
+      <p class="m-0 text-[23px] font-bold text-white/82">今日已工作</p>
+      <p
+        class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[64px] font-black leading-none tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
+      >
+        {formatWorkedTime(todayWorkedSeconds)}
+      </p>
 
-        <div
-          class="mt-10 flex h-24 items-end gap-4 border-b border-white/10 pb-2"
-        >
-          {#each [42, 36, 58, 48, 78, 42, 30, 52] as height}
-            <span
-              class="block w-4 rounded-full bg-[linear-gradient(180deg,#ff735d,rgba(255,115,93,0.08))]"
-              style={`height: ${height}px`}
-            ></span>
-          {/each}
-        </div>
+      <div
+        class="mt-auto flex h-24 items-end gap-4 border-b border-white/10 pb-2"
+      >
+        {#each [42, 36, 58, 48, 78, 42, 30, 52] as height}
+          <span
+            class="block w-4 rounded-full bg-[linear-gradient(180deg,#ff735d,rgba(255,115,93,0.08))]"
+            style={`height: ${height}px`}
+          ></span>
+        {/each}
       </div>
     </div>
 
