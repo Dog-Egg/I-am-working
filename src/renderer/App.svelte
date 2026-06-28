@@ -9,6 +9,11 @@
   let isReady = false;
   let isSaving = false;
   let saveTimer: number | null = null;
+  let isActive = false;
+  let activeStartedAt: number | null = null;
+  let activeDurationSeconds: number | null = null;
+  let baseWorkedSeconds = 0;
+  let tickInterval: number | null = null;
 
   const toSeconds = (durationSeconds: number): number => {
     if (!Number.isFinite(durationSeconds)) {
@@ -31,6 +36,39 @@
       window.clearTimeout(saveTimer);
       saveTimer = null;
     }
+  };
+
+  const computeActiveElapsedSeconds = (): number => {
+    if (
+      !isActive ||
+      activeStartedAt === null ||
+      activeDurationSeconds === null
+    ) {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      Math.min(
+        activeDurationSeconds,
+        Math.floor((Date.now() - activeStartedAt) / 1000),
+      ),
+    );
+  };
+
+  const stopTick = (): void => {
+    if (tickInterval !== null) {
+      window.clearInterval(tickInterval);
+      tickInterval = null;
+    }
+  };
+
+  const startTick = (): void => {
+    stopTick();
+    todayWorkedSeconds = baseWorkedSeconds + computeActiveElapsedSeconds();
+    tickInterval = window.setInterval(() => {
+      todayWorkedSeconds = baseWorkedSeconds + computeActiveElapsedSeconds();
+    }, 1000);
   };
 
   const saveDuration = async (): Promise<void> => {
@@ -67,7 +105,17 @@
     durationSeconds = toSeconds(state.durationSeconds);
     savedSeconds = durationSeconds;
     todayWorkedSeconds = state.todayWorkedSeconds;
+    baseWorkedSeconds = state.todayWorkedSeconds;
+    isActive = state.isActive;
+    activeStartedAt = state.activeStartedAt;
+    activeDurationSeconds = state.activeDurationSeconds;
     isReady = true;
+
+    if (isActive) {
+      startTick();
+    } else {
+      stopTick();
+    }
   };
 
   const startWork = async (): Promise<void> => {
@@ -81,9 +129,19 @@
 
   onMount(() => {
     void loadState();
+    window.workApi.onFinished(() => {
+      stopTick();
+      isActive = false;
+      activeStartedAt = null;
+      activeDurationSeconds = null;
+      void loadState();
+    });
   });
 
-  onDestroy(clearSaveTimer);
+  onDestroy(() => {
+    clearSaveTimer();
+    stopTick();
+  });
 </script>
 
 <main class="grid min-h-screen place-items-center bg-transparent text-white">
@@ -116,7 +174,7 @@
           />
         </svg>
       </div>
-      <p class="m-0 text-[23px] font-bold text-white/82">今日已工作</p>
+      <p class="m-0 text-[23px] font-bold text-white/82">今日工作时长</p>
       <p
         class="m-0 mt-4 bg-[linear-gradient(180deg,#fff_20%,#ffd9aa_100%)] bg-clip-text text-[40px] leading-none font-black tracking-normal text-transparent [font-variant-numeric:tabular-nums]"
       >
@@ -146,10 +204,10 @@
       <button
         class="no-drag mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] leading-none font-black text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
         type="button"
-        disabled={isSaving}
+        disabled={isSaving || isActive}
         on:click={startWork}
       >
-        {buttonLabel}
+        {isActive ? "工作中..." : buttonLabel}
       </button>
     </div>
   </section>

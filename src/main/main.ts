@@ -83,6 +83,17 @@ const readActiveTimerRemainingSeconds = (): number => {
   return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
 };
 
+const readActiveTimerElapsedSeconds = (): number => {
+  if (!activeTimer) {
+    return 0;
+  }
+
+  return activeTimer.durationSeconds - readActiveTimerRemainingSeconds();
+};
+
+const readDisplayedWorkedSeconds = (dateKey = getTodayKey()): number =>
+  readWorkedSeconds(dateKey) + readActiveTimerElapsedSeconds();
+
 const ensureDailyWork = (dateKey: string): DailyWork => {
   workState.dailyWork[dateKey] ??= { workedSeconds: 0 };
 
@@ -145,6 +156,9 @@ const getState = () => {
     buttonLabel: todayWorkedSeconds === 0 ? "开始工作" : "继续工作",
     durationSeconds: workState.settings.durationSeconds,
     todayWorkedSeconds,
+    isActive: !!activeTimer,
+    activeStartedAt: activeTimer?.startedAt ?? null,
+    activeDurationSeconds: activeTimer?.durationSeconds ?? null,
   };
 };
 
@@ -155,10 +169,6 @@ const closeMainWindow = (): void => {
 };
 
 const showMainWindow = (): void => {
-  if (activeTimer) {
-    return;
-  }
-
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setAlwaysOnTop(true, "screen-saver");
     mainWindow.show();
@@ -244,6 +254,10 @@ const finishWork = async (): Promise<void> => {
   await saveWorkState();
   updateTrayMenu();
   showMainWindow();
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("timer:finished");
+  }
 };
 
 const createTrayIcon = (): Electron.NativeImage => {
@@ -271,7 +285,7 @@ const updateTrayMenu = (): void => {
     return;
   }
 
-  const todayMinutes = Math.floor(readWorkedSeconds() / 60);
+  const todayMinutes = Math.floor(readDisplayedWorkedSeconds() / 60);
   const remainingSeconds = readActiveTimerRemainingSeconds();
   const countdownLabel = formatCountdown(remainingSeconds);
 
@@ -284,8 +298,7 @@ const updateTrayMenu = (): void => {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: activeTimer ? `工作中 ${countdownLabel}` : "显示提示",
-        enabled: !activeTimer,
+        label: "显示窗口",
         click: showMainWindow,
       },
       {
@@ -318,9 +331,6 @@ const stopTrayCountdown = (): void => {
 
 const createTray = (): void => {
   tray = new Tray(createTrayIcon());
-  tray.on("click", () => {
-    showMainWindow();
-  });
   updateTrayMenu();
 };
 
