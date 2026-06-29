@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -25,6 +26,20 @@ struct HourlyWorkRecord {
     work_seconds: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+enum TrayTimeFormat {
+    #[serde(rename = "HH:MM:SS")]
+    HhMmSs,
+    #[serde(rename = "HH:MM")]
+    HhMm,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+struct AppSettings {
+    show_tray_time: bool,
+    tray_time_format: TrayTimeFormat,
+}
+
 struct AppState {
     last_activity: Instant,
     is_active: bool,
@@ -35,12 +50,15 @@ struct AppState {
     today_start_unix: i64,
     today_end_unix: i64,
     today_work_seconds: u64,
+    settings: AppSettings,
+    settings_path: PathBuf,
     db: Connection,
 }
 
 const IDLE_THRESHOLD_SECS: u64 = 60;
 const FLUSH_INTERVAL_SECS: u64 = 60;
 const SECONDS_PER_HOUR: i64 = 60 * 60;
+const TRAY_ID: &str = "work-time";
 const CREATE_HOURLY_WORK_STATS_SQL: &str = "CREATE TABLE IF NOT EXISTS hourly_work_stats (
     hour_start_unix INTEGER PRIMARY KEY,
     work_seconds INTEGER NOT NULL DEFAULT 0
@@ -116,10 +134,14 @@ fn today_range_unix() -> (i64, i64) {
     (start.timestamp(), end.timestamp())
 }
 
-fn init_db(app: &App) -> Result<Connection, Box<dyn std::error::Error>> {
+fn init_app_data_dir(app: &App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app_data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&app_data_dir)?;
 
+    Ok(app_data_dir)
+}
+
+fn init_db(app_data_dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let db = Connection::open(app_data_dir.join("work-stats.sqlite3"))?;
     init_db_schema(&db)?;
 
@@ -129,6 +151,43 @@ fn init_db(app: &App) -> Result<Connection, Box<dyn std::error::Error>> {
 fn init_db_schema(db: &Connection) -> rusqlite::Result<()> {
     log_sql!(CREATE_HOURLY_WORK_STATS_SQL);
     db.execute(CREATE_HOURLY_WORK_STATS_SQL, [])?;
+
+    Ok(())
+}
+
+fn default_settings() -> AppSettings {
+    AppSettings {
+        show_tray_time: true,
+        tray_time_format: TrayTimeFormat::HhMm,
+    }
+}
+
+#[cfg(debug_assertions)]
+fn log_settings_file(action: &str, path: &Path) {
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
+    eprintln!("[settings {timestamp}] {action} path={}", path.display());
+}
+
+#[cfg(not(debug_assertions))]
+fn log_settings_file(_action: &str, _path: &Path) {}
+
+fn load_settings(path: &Path) -> Result<AppSettings, Box<dyn std::error::Error>> {
+    if !path.exists() {
+        return Ok(default_settings());
+    }
+
+    log_settings_file("read", path);
+    let contents = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&contents)?)
+}
+
+fn persist_settings(path: &Path, settings: &AppSettings) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    log_settings_file("write", path);
+    std::fs::write(path, serde_json::to_vec_pretty(settings)?)?;
 
     Ok(())
 }
@@ -191,6 +250,40 @@ fn build_stats(state: &AppState) -> Stats {
     }
 }
 
+fn format_hours_minutes(total_seconds: u64) -> String {
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+
+    format!("{hours:02}:{minutes:02}")
+}
+
+fn format_hours_minutes_seconds(total_seconds: u64) -> String {
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn tray_title(today_work_seconds: u64, settings: &AppSettings) -> String {
+    if !settings.show_tray_time {
+        return String::new();
+    }
+
+    match settings.tray_time_format {
+        TrayTimeFormat::HhMmSs => format_hours_minutes_seconds(today_work_seconds),
+        TrayTimeFormat::HhMm => format_hours_minutes(today_work_seconds),
+    }
+}
+
+fn update_tray_title(app: &AppHandle, today_work_seconds: u64, settings: &AppSettings) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        if let Err(err) = tray.set_title(Some(tray_title(today_work_seconds, settings))) {
+            eprintln!("failed to update tray title: {err}");
+        }
+    }
+}
+
 #[tauri::command]
 fn get_stats(state: State<'_, Arc<Mutex<AppState>>>) -> Stats {
     let s = state.lock().unwrap();
@@ -205,6 +298,30 @@ fn get_work_records(
 ) -> Result<Vec<HourlyWorkRecord>, String> {
     let s = state.lock().unwrap();
     work_records_in_range(&s, start_unix, end_unix).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
+    let s = state.lock().unwrap();
+    s.settings.clone()
+}
+
+#[tauri::command]
+fn update_settings(
+    app: AppHandle,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    settings: AppSettings,
+) -> Result<AppSettings, String> {
+    let (today_work_seconds, next_settings) = {
+        let mut s = state.lock().unwrap();
+        persist_settings(&s.settings_path, &settings).map_err(|e| e.to_string())?;
+        s.settings = settings;
+        (s.today_work_seconds, s.settings.clone())
+    };
+
+    update_tray_title(&app, today_work_seconds, &next_settings);
+
+    Ok(next_settings)
 }
 
 fn work_records_in_range(
@@ -270,6 +387,8 @@ mod tests {
             today_start_unix: 0,
             today_end_unix: 86_400,
             today_work_seconds: 0,
+            settings: default_settings(),
+            settings_path: std::env::temp_dir().join("i-am-working-test-settings.json"),
             db,
         }
     }
@@ -367,6 +486,45 @@ mod tests {
         assert!(!stats.is_active);
         assert_eq!(stats.idle_seconds, 0);
     }
+
+    #[test]
+    fn format_hours_minutes_omits_seconds() {
+        assert_eq!(format_hours_minutes(0), "00:00");
+        assert_eq!(format_hours_minutes(59), "00:00");
+        assert_eq!(format_hours_minutes(60), "00:01");
+        assert_eq!(format_hours_minutes(3_600 + 59 * 60 + 59), "01:59");
+        assert_eq!(format_hours_minutes(100 * 3_600), "100:00");
+    }
+
+    #[test]
+    fn tray_title_respects_visibility_and_format() {
+        let mut settings = default_settings();
+        assert_eq!(tray_title(3_661, &settings), "01:01");
+
+        settings.tray_time_format = TrayTimeFormat::HhMmSs;
+        assert_eq!(tray_title(3_661, &settings), "01:01:01");
+
+        settings.show_tray_time = false;
+        assert_eq!(tray_title(3_661, &settings), "");
+    }
+
+    #[test]
+    fn load_settings_uses_json_file_values() {
+        let path = std::env::temp_dir().join(format!(
+            "i-am-working-test-settings-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let settings = AppSettings {
+            show_tray_time: false,
+            tray_time_format: TrayTimeFormat::HhMmSs,
+        };
+
+        persist_settings(&path, &settings).unwrap();
+
+        assert_eq!(load_settings(&path).unwrap(), settings);
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 // 全局键鼠监听线程：轮询设备状态，检测到变化即视为活动，更新 last_activity
@@ -399,7 +557,7 @@ fn spawn_ticker(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));
         let state = app.state::<Arc<Mutex<AppState>>>();
-        let stats = {
+        let (stats, settings) = {
             let mut s = state.lock().unwrap();
             let now = now_unix();
             if now >= s.today_end_unix {
@@ -437,8 +595,9 @@ fn spawn_ticker(app: AppHandle) {
                 }
             }
 
-            build_stats(&s)
+            (build_stats(&s), s.settings.clone())
         };
+        update_tray_title(&app, stats.today_work_seconds, &settings);
         let _ = app.emit("stats-updated", stats);
     });
 }
@@ -454,6 +613,15 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
+fn show_tab(app: &AppHandle, tab: &str) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+
+    let _ = app.emit("show-tab", tab);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -466,10 +634,17 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let db = init_db(app)?;
+            let app_data_dir = init_app_data_dir(app)?;
+            let db = init_db(&app_data_dir)?;
             let (today_start, today_end) = today_range_unix();
             let today_work_seconds =
                 persisted_work_seconds_in_range(&db, today_start, today_end).unwrap_or(0);
+            let settings_path = app_data_dir.join("settings.json");
+            let settings = load_settings(&settings_path).unwrap_or_else(|err| {
+                #[cfg(debug_assertions)]
+                eprintln!("failed to load app settings: {err}");
+                default_settings()
+            });
             let state = Arc::new(Mutex::new(AppState {
                 last_activity: Instant::now(),
                 is_active: false,
@@ -479,6 +654,8 @@ pub fn run() {
                 today_start_unix: today_start,
                 today_end_unix: today_end,
                 today_work_seconds,
+                settings: settings.clone(),
+                settings_path,
                 db,
             }));
             app.manage(state.clone());
@@ -488,19 +665,19 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             spawn_input_monitor(state);
-            spawn_ticker(app.handle().clone());
-
-            // 托盘菜单：显示统计 / 退出
-            let show_item = MenuItem::with_id(app, "show", "显示统计", true, None::<&str>)?;
+            // 托盘菜单：统计 / 设置 / 退出
+            let stats_item = MenuItem::with_id(app, "stats", "统计", true, None::<&str>)?;
+            let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&stats_item, &settings_item, &quit_item])?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(include_image!("./icons/icon.png"))
                 .menu(&menu)
                 .tooltip("I am working")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => toggle_window(app),
+                    "stats" => show_tab(app, "stats"),
+                    "settings" => show_tab(app, "settings"),
                     "quit" => {
                         let state = app.state::<Arc<Mutex<AppState>>>();
                         if let Ok(mut state) = state.lock() {
@@ -523,10 +700,18 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            update_tray_title(app.handle(), today_work_seconds, &settings);
+
+            spawn_ticker(app.handle().clone());
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_stats, get_work_records])
+        .invoke_handler(tauri::generate_handler![
+            get_stats,
+            get_work_records,
+            get_settings,
+            update_settings,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
