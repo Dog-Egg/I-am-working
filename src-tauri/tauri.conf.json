@@ -14,9 +14,9 @@
       {
         "title": "I am working!",
         "label": "main",
-        "width": 360,
-        "height": 280,
-        "resizable": false,
+        "width": 760,
+        "height": 560,
+        "resizable": true,
         "visible": false,
         "decorations": true,
         "center": true
