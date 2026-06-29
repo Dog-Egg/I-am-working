@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "i-am-working",
+  "productName": "I Am Working",
   "version": "0.1.0",
   "identifier": "com.iamworking.app",
   "build": {
