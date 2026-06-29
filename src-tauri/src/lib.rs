@@ -6,6 +6,7 @@ use chrono::{Datelike, Local, TimeZone};
 use device_query::DeviceQuery;
 use rusqlite::{params, Connection};
 use tauri::{
+    include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager, State, WindowEvent,
@@ -495,7 +496,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(include_image!("./icons/icon.png"))
                 .menu(&menu)
                 .tooltip("I am working")
                 .on_menu_event(|app, event| match event.id.as_ref() {
