@@ -12,9 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "i-am-working",
-        "width": 800,
-        "height": 600
+        "title": "I am working!",
+        "label": "main",
+        "width": 360,
+        "height": 280,
+        "resizable": false,
+        "visible": false,
+        "decorations": true,
+        "center": true
       }
     ],
     "security": {
