@@ -640,9 +640,9 @@ pub fn run() {
             let today_work_seconds =
                 persisted_work_seconds_in_range(&db, today_start, today_end).unwrap_or(0);
             let settings_path = app_data_dir.join("settings.json");
-            let settings = load_settings(&settings_path).unwrap_or_else(|err| {
+            let settings = load_settings(&settings_path).unwrap_or_else(|_err| {
                 #[cfg(debug_assertions)]
-                eprintln!("failed to load app settings: {err}");
+                eprintln!("failed to load app settings: {_err}");
                 default_settings()
             });
             let state = Arc::new(Mutex::new(AppState {
