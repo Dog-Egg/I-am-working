@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Local, TimeZone};
-use device_query::DeviceQuery;
 use rusqlite::{params, Connection};
 use tauri::{
     include_image,
@@ -549,29 +548,32 @@ mod tests {
     }
 }
 
-// 全局键鼠监听线程：轮询设备状态，检测到变化即视为活动，更新 last_activity
-// 选用轮询而非事件回调，避免 macOS 上 CGEventTap 在窗口获焦时崩溃
-fn spawn_input_monitor(state: Arc<Mutex<AppState>>) {
-    std::thread::spawn(move || {
-        let device_state = device_query::DeviceState::new();
-        let mut last_mouse = device_state.get_mouse();
-        let mut last_keys = device_state.query_keymap();
-        loop {
-            std::thread::sleep(Duration::from_millis(200));
-            let mouse = device_state.get_mouse();
-            let keys = device_state.query_keymap();
-            if mouse.coords != last_mouse.coords
-                || mouse.button_pressed != last_mouse.button_pressed
-                || keys != last_keys
-            {
-                if let Ok(mut s) = state.lock() {
-                    s.last_activity = Instant::now();
-                }
-            }
-            last_mouse = mouse;
-            last_keys = keys;
-        }
-    });
+// 系统空闲时间检测：返回自最后一次用户输入（鼠标/键盘任意事件）至今的秒数。
+// macOS: 走 CoreGraphics 的 CGEventSourceSecondsSinceLastEventType，
+//   该 API 设计上就是用来查询"用户多久没操作了"，不需要辅助功能权限。
+//   因此彻底替代了原来的 device_query 轮询方案——既不会触发系统弹窗，
+//   也省掉了每 200ms 一次的轮询线程，CPU/电池占用更低。
+#[cfg(target_os = "macos")]
+mod cg {
+    use std::ffi::c_uint;
+    // kCGEventSourceStateHIDSystemState = 1
+    pub const HID_SYSTEM_STATE: c_uint = 1;
+    // kCGAnyInputEventType = 0xFFFFFFFF（uint32 全 1，Apple 头文件里定义为 ~0）
+    pub const ANY_INPUT_EVENT: c_uint = 0xFFFF_FFFF;
+
+    extern "C" {
+        pub fn CGEventSourceSecondsSinceLastEventType(state_id: c_uint, event_type: c_uint) -> f64;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn system_idle_seconds() -> f64 {
+    unsafe { cg::CGEventSourceSecondsSinceLastEventType(cg::HID_SYSTEM_STATE, cg::ANY_INPUT_EVENT) }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_idle_seconds() -> f64 {
+    0.0
 }
 
 // 每秒 tick：若距上次活动 < 60s 则累计工作时长；否则标记为空闲
@@ -592,6 +594,15 @@ fn spawn_ticker(app: AppHandle) {
                 s.today_end_unix = today_end;
                 s.today_work_seconds =
                     persisted_work_seconds_in_range(&s.db, today_start, today_end).unwrap_or(0);
+            }
+
+            // 系统级空闲检测：若用户在 IDLE_THRESHOLD_SECS 内有过任意键鼠输入，
+            // 视为"活动中"，刷新 last_activity；后续 last_activity.elapsed() 即代表空闲时长
+            let idle_secs = system_idle_seconds();
+            // #[cfg(debug_assertions)]
+            // eprintln!("[idle] system_idle_seconds() = {idle_secs:.3}s");
+            if idle_secs < IDLE_THRESHOLD_SECS as f64 {
+                s.last_activity = Instant::now();
             }
 
             let idle = s.last_activity.elapsed();
@@ -711,7 +722,6 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            spawn_input_monitor(state);
             // 托盘菜单：统计 / 设置 / 退出
             let stats_item = MenuItem::with_id(app, "stats", "统计", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
