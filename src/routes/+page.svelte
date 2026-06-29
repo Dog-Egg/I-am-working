@@ -1,25 +1,13 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import {
+    commands,
+    events,
+    type Stats,
+    type HourlyWorkRecord,
+    type AppSettings,
+    type TrayTimeFormat,
+  } from "$lib/bindings";
   import { onMount } from "svelte";
-
-  type Stats = {
-    today_work_seconds: number;
-    is_active: boolean;
-    idle_seconds: number;
-  };
-
-  type HourlyWorkRecord = {
-    hour_start_unix: number;
-    work_seconds: number;
-  };
-
-  type TrayTimeFormat = "HH:MM:SS" | "HH:MM";
-
-  type AppSettings = {
-    show_tray_time: boolean;
-    tray_time_format: TrayTimeFormat;
-  };
 
   type Period = "day" | "week" | "month" | "year";
   type AppTab = "stats" | "settings";
@@ -121,13 +109,13 @@
     isLoading = true;
 
     try {
-      const nextRecords = await invoke<HourlyWorkRecord[]>("get_work_records", {
-        startUnix: toUnixSeconds(start),
-        endUnix: toUnixSeconds(end),
-      });
+      const result = await commands.getWorkRecords(
+        toUnixSeconds(start),
+        toUnixSeconds(end),
+      );
 
-      if (requestId === loadRequestId) {
-        records = nextRecords;
+      if (requestId === loadRequestId && result.status === "ok") {
+        records = result.data;
       }
     } finally {
       if (requestId === loadRequestId) {
@@ -140,20 +128,17 @@
     const requestId = ++settingsRequestId;
     settings = nextSettings;
 
-    try {
-      const savedSettings = await invoke<AppSettings>("update_settings", {
-        settings: nextSettings,
-      });
+    const result = await commands.updateSettings(nextSettings);
 
+    if (result.status === "ok") {
       if (requestId === settingsRequestId) {
-        settings = savedSettings;
+        settings = result.data;
       }
-    } catch (error) {
+    } else {
       if (requestId === settingsRequestId) {
-        const savedSettings = await invoke<AppSettings>("get_settings");
-        settings = savedSettings;
+        settings = await commands.getSettings();
       }
-      console.error("failed to update settings", error);
+      console.error("failed to update settings", result.error);
     }
   }
 
@@ -259,32 +244,36 @@
     let unlistenTab: (() => void) | null = null;
     let disposed = false;
 
-    void invoke<Stats>("get_stats").then((nextStats) => {
+    void commands.getStats().then((nextStats) => {
       if (!disposed) stats = nextStats;
     });
-    void invoke<AppSettings>("get_settings").then((nextSettings) => {
+    void commands.getSettings().then((nextSettings) => {
       if (!disposed) settings = nextSettings;
     });
 
-    void listen<Stats>("stats-updated", (event) => {
-      stats = event.payload;
-    }).then((nextUnlisten) => {
-      if (disposed) {
-        nextUnlisten();
-      } else {
-        unlistenStats = nextUnlisten;
-      }
-    });
+    void events.statsUpdated
+      .listen((event) => {
+        stats = event.payload;
+      })
+      .then((nextUnlisten) => {
+        if (disposed) {
+          nextUnlisten();
+        } else {
+          unlistenStats = nextUnlisten;
+        }
+      });
 
-    void listen<AppTab>("show-tab", (event) => {
-      activeTab = event.payload;
-    }).then((nextUnlisten) => {
-      if (disposed) {
-        nextUnlisten();
-      } else {
-        unlistenTab = nextUnlisten;
-      }
-    });
+    void events.showTab
+      .listen((event) => {
+        activeTab = event.payload as AppTab;
+      })
+      .then((nextUnlisten) => {
+        if (disposed) {
+          nextUnlisten();
+        } else {
+          unlistenTab = nextUnlisten;
+        }
+      });
 
     const refreshTimer = window.setInterval(() => {
       void loadRecords(period);

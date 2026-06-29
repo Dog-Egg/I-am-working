@@ -10,35 +10,44 @@ use tauri::{
     include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Emitter, Manager, State, WindowEvent,
+    App, AppHandle, Manager, State, WindowEvent,
 };
+use tauri_specta::{Builder as SpectaBuilder, Event as SpectaEvent};
 
-#[derive(Clone, serde::Serialize)]
-struct Stats {
-    today_work_seconds: u64,
-    is_active: bool,
-    idle_seconds: u64,
+#[derive(Clone, Debug, serde::Serialize, specta::Type)]
+pub struct Stats {
+    pub today_work_seconds: u64,
+    pub is_active: bool,
+    pub idle_seconds: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct HourlyWorkRecord {
-    hour_start_unix: i64,
-    work_seconds: u64,
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, specta::Type)]
+pub struct HourlyWorkRecord {
+    pub hour_start_unix: i64,
+    pub work_seconds: u64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-enum TrayTimeFormat {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, specta::Type)]
+pub enum TrayTimeFormat {
     #[serde(rename = "HH:MM:SS")]
     HhMmSs,
     #[serde(rename = "HH:MM")]
     HhMm,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-struct AppSettings {
-    show_tray_time: bool,
-    tray_time_format: TrayTimeFormat,
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, specta::Type)]
+pub struct AppSettings {
+    pub show_tray_time: bool,
+    pub tray_time_format: TrayTimeFormat,
 }
+
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+#[serde(transparent)]
+pub struct StatsUpdated(pub Stats);
+
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+#[serde(transparent)]
+pub struct ShowTab(pub String);
 
 struct AppState {
     last_activity: Instant,
@@ -284,12 +293,14 @@ fn update_tray_title(app: &AppHandle, today_work_seconds: u64, settings: &AppSet
     }
 }
 
+#[specta::specta]
 #[tauri::command]
 fn get_stats(state: State<'_, Arc<Mutex<AppState>>>) -> Stats {
     let s = state.lock().unwrap();
     build_stats(&s)
 }
 
+#[specta::specta]
 #[tauri::command]
 fn get_work_records(
     state: State<'_, Arc<Mutex<AppState>>>,
@@ -300,12 +311,14 @@ fn get_work_records(
     work_records_in_range(&s, start_unix, end_unix).map_err(|e| e.to_string())
 }
 
+#[specta::specta]
 #[tauri::command]
 fn get_settings(state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
     let s = state.lock().unwrap();
     s.settings.clone()
 }
 
+#[specta::specta]
 #[tauri::command]
 fn update_settings(
     app: AppHandle,
@@ -525,6 +538,15 @@ mod tests {
         assert_eq!(load_settings(&path).unwrap(), settings);
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn export_bindings() {
+        use specta_typescript::Typescript;
+
+        specta_builder()
+            .export(Typescript::default(), "../src/lib/bindings.ts")
+            .expect("Failed to export typescript bindings");
+    }
 }
 
 // 全局键鼠监听线程：轮询设备状态，检测到变化即视为活动，更新 last_activity
@@ -598,7 +620,7 @@ fn spawn_ticker(app: AppHandle) {
             (build_stats(&s), s.settings.clone())
         };
         update_tray_title(&app, stats.today_work_seconds, &settings);
-        let _ = app.emit("stats-updated", stats);
+        let _ = StatsUpdated(stats).emit(&app);
     });
 }
 
@@ -619,11 +641,33 @@ fn show_tab(app: &AppHandle, tab: &str) {
         let _ = win.set_focus();
     }
 
-    let _ = app.emit("show-tab", tab);
+    let _ = ShowTab(tab.to_string()).emit(app);
+}
+
+fn specta_builder() -> SpectaBuilder<tauri::Wry> {
+    SpectaBuilder::<tauri::Wry>::new()
+        .dangerously_cast_bigints_to_number()
+        .commands(tauri_specta::collect_commands![
+            get_stats,
+            get_work_records,
+            get_settings,
+            update_settings,
+        ])
+        .events(tauri_specta::collect_events![StatsUpdated, ShowTab])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let specta = specta_builder();
+
+    #[cfg(debug_assertions)]
+    {
+        use specta_typescript::Typescript;
+        specta
+            .export(Typescript::default(), "../src/lib/bindings.ts")
+            .expect("Failed to export typescript bindings");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
@@ -633,7 +677,10 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .setup(|app| {
+        .invoke_handler(specta.invoke_handler())
+        .setup(move |app| {
+            specta.mount_events(app);
+
             let app_data_dir = init_app_data_dir(app)?;
             let db = init_db(&app_data_dir)?;
             let (today_start, today_end) = today_range_unix();
@@ -706,12 +753,6 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            get_stats,
-            get_work_records,
-            get_settings,
-            update_settings,
-        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
