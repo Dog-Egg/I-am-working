@@ -122,7 +122,7 @@
 </script>
 
 <div
-  class="time-dial no-drag relative mx-auto aspect-square w-full max-w-[360px] touch-none select-none"
+  class="time-dial relative mx-auto aspect-square w-full max-w-[360px] touch-none select-none"
   class:opacity-70={disabled}
   bind:this={dialElement}
   role="slider"

@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import type { SaveDurationResponse, StateResponse } from "../types/global";
   import TimeDial from "./components/TimeDial.svelte";
 
   let buttonLabel = "开始工作";
@@ -14,6 +17,7 @@
   let activeDurationSeconds: number | null = null;
   let baseWorkedSeconds = 0;
   let tickInterval: number | null = null;
+  let finishedUnlisten: UnlistenFn | null = null;
 
   const toSeconds = (durationSeconds: number): number => {
     if (!Number.isFinite(durationSeconds)) {
@@ -81,7 +85,9 @@
     isSaving = true;
 
     try {
-      const state = await window.workApi.saveDuration(durationSeconds);
+      const state = await invoke<SaveDurationResponse>("save_duration", {
+        durationSeconds,
+      });
 
       savedSeconds = toSeconds(state.durationSeconds);
       durationSeconds = savedSeconds;
@@ -99,7 +105,7 @@
   };
 
   const loadState = async (): Promise<void> => {
-    const state = await window.workApi.getState();
+    const state = await invoke<StateResponse>("get_state");
 
     buttonLabel = state.buttonLabel;
     durationSeconds = toSeconds(state.durationSeconds);
@@ -120,7 +126,8 @@
 
   const startWork = async (): Promise<void> => {
     await saveDuration();
-    window.workApi.startWork();
+    await invoke("start_work");
+    await loadState();
   };
 
   $: if (isReady && durationSeconds !== savedSeconds && !isSaving) {
@@ -129,16 +136,19 @@
 
   onMount(() => {
     void loadState();
-    window.workApi.onFinished(() => {
+    void listen("timer:finished", () => {
       stopTick();
       isActive = false;
       activeStartedAt = null;
       activeDurationSeconds = null;
       void loadState();
+    }).then((un) => {
+      finishedUnlisten = un;
     });
   });
 
   onDestroy(() => {
+    finishedUnlisten?.();
     clearSaveTimer();
     stopTick();
   });
@@ -146,7 +156,8 @@
 
 <main class="grid min-h-screen place-items-center bg-transparent text-white">
   <section
-    class="drag-region grid h-full w-full grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
+    data-tauri-drag-region
+    class="grid h-full w-full grid-cols-[minmax(210px,0.78fr)_minmax(360px,1.22fr)] gap-8 rounded-[30px] border border-white/10 bg-[#191b24]/95 p-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] max-[720px]:grid-cols-1"
     aria-labelledby="app-title"
   >
     <div
@@ -202,7 +213,7 @@
       />
 
       <button
-        class="no-drag mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] leading-none font-black text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
+        class="mx-auto min-h-16 w-full max-w-130 cursor-pointer rounded-full border border-[#ff937c] bg-[linear-gradient(180deg,#ff7c63_0%,#ff4e3d_100%)] px-8 text-[34px] leading-none font-black text-white shadow-[0_16px_36px_rgba(255,86,64,0.34),inset_0_1px_0_rgba(255,255,255,0.35)] transition hover:brightness-105 active:translate-y-px disabled:cursor-default disabled:opacity-70"
         type="button"
         disabled={isSaving || isActive}
         on:click={startWork}
@@ -218,13 +229,5 @@
   :global(body),
   :global(#app) {
     background: transparent;
-  }
-
-  .drag-region {
-    -webkit-app-region: drag;
-  }
-
-  .no-drag {
-    -webkit-app-region: no-drag;
   }
 </style>

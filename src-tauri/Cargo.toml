@@ -1,0 +1,30 @@
+[package]
+name = "i-am-working"
+version = "1.0.0"
+description = "I Am Working"
+authors = [""]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "i_am_working_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "time",
+    "sync",
+    "macros",
+] }
+dirs = "5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
