@@ -18,7 +18,7 @@ struct Stats {
     idle_seconds: u64,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct HourlyWorkRecord {
     hour_start_unix: i64,
     work_seconds: u64,
@@ -120,10 +120,16 @@ fn init_db(app: &App) -> Result<Connection, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&app_data_dir)?;
 
     let db = Connection::open(app_data_dir.join("work-stats.sqlite3"))?;
+    init_db_schema(&db)?;
+
+    Ok(db)
+}
+
+fn init_db_schema(db: &Connection) -> rusqlite::Result<()> {
     log_sql!(CREATE_HOURLY_WORK_STATS_SQL);
     db.execute(CREATE_HOURLY_WORK_STATS_SQL, [])?;
 
-    Ok(db)
+    Ok(())
 }
 
 fn flush_pending_work(state: &mut AppState) -> rusqlite::Result<()> {
@@ -197,30 +203,33 @@ fn get_work_records(
     end_unix: i64,
 ) -> Result<Vec<HourlyWorkRecord>, String> {
     let s = state.lock().unwrap();
+    work_records_in_range(&s, start_unix, end_unix).map_err(|e| e.to_string())
+}
+
+fn work_records_in_range(
+    state: &AppState,
+    start_unix: i64,
+    end_unix: i64,
+) -> rusqlite::Result<Vec<HourlyWorkRecord>> {
     let mut records = {
         log_sql!(
             SELECT_WORK_RECORDS_SQL,
             "?1" => start_unix,
             "?2" => end_unix,
         );
-        let mut stmt =
-            s.db.prepare(SELECT_WORK_RECORDS_SQL)
-                .map_err(|e| e.to_string())?;
+        let mut stmt = state.db.prepare(SELECT_WORK_RECORDS_SQL)?;
 
-        let rows = stmt
-            .query_map(params![start_unix, end_unix], |row| {
-                Ok(HourlyWorkRecord {
-                    hour_start_unix: row.get(0)?,
-                    work_seconds: row.get::<_, i64>(1)?.max(0) as u64,
-                })
+        let rows = stmt.query_map(params![start_unix, end_unix], |row| {
+            Ok(HourlyWorkRecord {
+                hour_start_unix: row.get(0)?,
+                work_seconds: row.get::<_, i64>(1)?.max(0) as u64,
             })
-            .map_err(|e| e.to_string())?;
+        })?;
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
+        rows.collect::<Result<Vec<_>, _>>()?
     };
 
-    for (hour_start, pending_seconds) in &s.pending_work_seconds_by_hour {
+    for (hour_start, pending_seconds) in &state.pending_work_seconds_by_hour {
         if *hour_start < start_unix || *hour_start >= end_unix {
             continue;
         }
@@ -241,6 +250,122 @@ fn get_work_records(
     records.sort_by_key(|record| record.hour_start_unix);
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_state() -> AppState {
+        let db = Connection::open_in_memory().unwrap();
+        init_db_schema(&db).unwrap();
+
+        AppState {
+            last_activity: Instant::now(),
+            is_active: false,
+            idle_started_at: None,
+            pending_work_seconds_by_hour: HashMap::new(),
+            last_flush_at: Instant::now(),
+            today_start_unix: 0,
+            today_end_unix: 86_400,
+            today_work_seconds: 0,
+            db,
+        }
+    }
+
+    #[test]
+    fn hour_start_unix_rounds_down_to_utc_hour() {
+        assert_eq!(hour_start_unix(0), 0);
+        assert_eq!(hour_start_unix(3_599), 0);
+        assert_eq!(hour_start_unix(3_600), 3_600);
+        assert_eq!(hour_start_unix(7_201), 7_200);
+        assert_eq!(hour_start_unix(-1), -3_600);
+    }
+
+    #[test]
+    fn flush_pending_work_inserts_and_accumulates_hourly_rows() {
+        let mut state = test_state();
+
+        state.pending_work_seconds_by_hour.insert(3_600, 10);
+        flush_pending_work(&mut state).unwrap();
+
+        assert!(state.pending_work_seconds_by_hour.is_empty());
+        assert_eq!(
+            persisted_work_seconds_in_range(&state.db, 0, 7_200).unwrap(),
+            10
+        );
+
+        state.pending_work_seconds_by_hour.insert(3_600, 5);
+        state.pending_work_seconds_by_hour.insert(7_200, 7);
+        flush_pending_work(&mut state).unwrap();
+
+        assert_eq!(
+            persisted_work_seconds_in_range(&state.db, 0, 10_800).unwrap(),
+            22
+        );
+        assert_eq!(
+            persisted_work_seconds_in_range(&state.db, 3_600, 7_200).unwrap(),
+            15
+        );
+    }
+
+    #[test]
+    fn persisted_work_seconds_in_range_uses_start_inclusive_end_exclusive() {
+        let mut state = test_state();
+        state.pending_work_seconds_by_hour.insert(0, 3);
+        state.pending_work_seconds_by_hour.insert(3_600, 5);
+        state.pending_work_seconds_by_hour.insert(7_200, 7);
+        flush_pending_work(&mut state).unwrap();
+
+        assert_eq!(
+            persisted_work_seconds_in_range(&state.db, 3_600, 7_200).unwrap(),
+            5
+        );
+    }
+
+    #[test]
+    fn work_records_in_range_merges_persisted_and_pending_records() {
+        let mut state = test_state();
+        state.pending_work_seconds_by_hour.insert(3_600, 100);
+        state.pending_work_seconds_by_hour.insert(7_200, 50);
+        flush_pending_work(&mut state).unwrap();
+
+        state.pending_work_seconds_by_hour.insert(3_600, 7);
+        state.pending_work_seconds_by_hour.insert(10_800, 11);
+        state.pending_work_seconds_by_hour.insert(14_400, 13);
+
+        assert_eq!(
+            work_records_in_range(&state, 0, 14_400).unwrap(),
+            vec![
+                HourlyWorkRecord {
+                    hour_start_unix: 3_600,
+                    work_seconds: 107,
+                },
+                HourlyWorkRecord {
+                    hour_start_unix: 7_200,
+                    work_seconds: 50,
+                },
+                HourlyWorkRecord {
+                    hour_start_unix: 10_800,
+                    work_seconds: 11,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn build_stats_uses_cached_today_work_seconds() {
+        let mut state = test_state();
+        state.today_work_seconds = 42;
+        state.pending_work_seconds_by_hour.insert(3_600, 999);
+        flush_pending_work(&mut state).unwrap();
+
+        let stats = build_stats(&state);
+
+        assert_eq!(stats.today_work_seconds, 42);
+        assert!(!stats.is_active);
+        assert_eq!(stats.idle_seconds, 0);
+    }
 }
 
 // 全局键鼠监听线程：轮询设备状态，检测到变化即视为活动，更新 last_activity
