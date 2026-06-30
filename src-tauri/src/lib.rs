@@ -63,7 +63,6 @@ fn push_log_message(app: &AppHandle, message: String) {
 }
 
 struct AppState {
-    last_activity: Instant,
     is_active: bool,
     // 进入空闲状态的瞬间；处于工作状态时为 None
     idle_started_at: Option<Instant>,
@@ -405,7 +404,6 @@ mod tests {
         init_db_schema(&db).unwrap();
 
         AppState {
-            last_activity: Instant::now(),
             is_active: false,
             idle_started_at: None,
             pending_work_seconds_by_hour: HashMap::new(),
@@ -560,6 +558,133 @@ mod tests {
             .export(Typescript::default(), "../src/lib/bindings.ts")
             .expect("Failed to export typescript bindings");
     }
+
+    // ---- apply_tick 状态机测试 ----
+
+    // 辅助：构造一个处于"活动"或"空闲"初始状态的 state
+    fn test_state_active() -> AppState {
+        let mut s = test_state();
+        s.is_active = true;
+        s
+    }
+
+    fn test_state_idle() -> AppState {
+        let mut s = test_state();
+        s.is_active = false;
+        s.idle_started_at = Some(Instant::now());
+        s
+    }
+
+    #[test]
+    fn apply_tick_active_stays_active_when_idle_below_threshold() {
+        // 活动 + idle=10s → 仍活动，无切换，累计 1 秒工作
+        let mut state = test_state_active();
+        let (was, now) = apply_tick(&mut state, 10.0, 1_000);
+        assert_eq!((was, now), (true, true));
+        assert!(state.is_active);
+        assert!(state.idle_started_at.is_none());
+        assert_eq!(state.today_work_seconds, 1);
+        assert_eq!(state.pending_work_seconds_by_hour.get(&0), Some(&1));
+    }
+
+    #[test]
+    fn apply_tick_idle_to_active_transition_at_threshold_boundary() {
+        // 空闲 + idle=59.99s → 切换为活动，累计 1 秒
+        let mut state = test_state_idle();
+        let (was, now) = apply_tick(&mut state, 59.99, 1_000);
+        assert_eq!((was, now), (false, true));
+        assert!(state.is_active);
+        assert!(state.idle_started_at.is_none());
+        assert_eq!(state.today_work_seconds, 1);
+    }
+
+    #[test]
+    fn apply_tick_active_to_idle_transition_at_threshold() {
+        // 活动 + idle=60s（等于阈值，不满足 < 60）→ 切换为空闲
+        let mut state = test_state_active();
+        let (was, now) = apply_tick(&mut state, 60.0, 1_000);
+        assert_eq!((was, now), (true, false));
+        assert!(!state.is_active);
+        assert!(state.idle_started_at.is_some());
+        // 不累计工作秒数
+        assert_eq!(state.today_work_seconds, 0);
+        assert!(state.pending_work_seconds_by_hour.is_empty());
+    }
+
+    #[test]
+    fn apply_tick_idle_stays_idle_does_not_re_record_start() {
+        // 已空闲 + idle=120s → 仍空闲，不切换，idle_started_at 不被覆盖
+        let mut state = test_state_idle();
+        let original_idle_start = state.idle_started_at;
+        let (was, now) = apply_tick(&mut state, 120.0, 1_000);
+        assert_eq!((was, now), (false, false));
+        assert_eq!(state.idle_started_at, original_idle_start);
+    }
+
+    #[test]
+    fn apply_tick_accumulates_work_seconds_within_today_range() {
+        // now 在 today_range 内 → 累计 today_work_seconds
+        let mut state = test_state_active();
+        state.today_start_unix = 1_000;
+        state.today_end_unix = 2_000;
+        apply_tick(&mut state, 10.0, 1_500);
+        apply_tick(&mut state, 10.0, 1_500);
+        assert_eq!(state.today_work_seconds, 2);
+    }
+
+    #[test]
+    fn apply_tick_does_not_accumulate_today_work_outside_range() {
+        // now < today_start → 不累计 today_work_seconds，但仍累计到 pending_work_seconds_by_hour
+        let mut state = test_state_active();
+        state.today_start_unix = 2_000;
+        state.today_end_unix = 3_000;
+        apply_tick(&mut state, 10.0, 1_500);
+        assert_eq!(state.today_work_seconds, 0);
+        assert_eq!(state.pending_work_seconds_by_hour.get(&0), Some(&1));
+
+        // now >= today_end → 同样不累计 today_work_seconds，但 pending 仍按小时累计
+        // 4_000 秒落在 hour_start=3_600 的小时桶
+        apply_tick(&mut state, 10.0, 4_000);
+        assert_eq!(state.today_work_seconds, 0);
+        assert_eq!(state.pending_work_seconds_by_hour.get(&3_600), Some(&1));
+    }
+
+    #[test]
+    fn apply_tick_accumulates_per_hour_buckets() {
+        // 跨小时：两次 tick 落在不同小时桶
+        let mut state = test_state_active();
+        state.today_start_unix = 0;
+        state.today_end_unix = 86_400;
+
+        apply_tick(&mut state, 5.0, 3_599); // hour_start = 0
+        apply_tick(&mut state, 5.0, 3_600); // hour_start = 3600
+        apply_tick(&mut state, 5.0, 3_601); // hour_start = 3600
+
+        assert_eq!(state.pending_work_seconds_by_hour.get(&0), Some(&1));
+        assert_eq!(state.pending_work_seconds_by_hour.get(&3_600), Some(&2));
+        assert_eq!(state.today_work_seconds, 3);
+    }
+
+    #[test]
+    fn apply_tick_exactly_below_threshold_is_active() {
+        // 验证阈值边界：idle=59.999...s 仍活动；idle=60s 进入空闲
+        let mut state = test_state_active();
+        let (_, is_active) = apply_tick(&mut state, 59.999_999_999, 1_000);
+        assert!(is_active);
+
+        let mut state = test_state_active();
+        let (_, is_active) = apply_tick(&mut state, 60.0, 1_000);
+        assert!(!is_active);
+    }
+
+    #[test]
+    fn apply_tick_zero_idle_is_active() {
+        // 刚操作过：idle=0 → 活动
+        let mut state = test_state_idle();
+        let (was, now) = apply_tick(&mut state, 0.0, 1_000);
+        assert_eq!((was, now), (false, true));
+        assert!(state.is_active);
+    }
 }
 
 // 系统空闲时间检测：返回自最后一次用户输入（鼠标/键盘任意事件）至今的秒数。
@@ -590,6 +715,31 @@ fn system_idle_seconds() -> f64 {
     0.0
 }
 
+// 单次 tick 的状态机核心逻辑：依据系统空闲时长更新活动状态、累计工作秒数，
+// 并返回切换信息供调用方做副作用（日志/事件）。纯函数，不接触 AppHandle / 系统 API。
+//
+// 返回 (was_active, is_active)：调用方据此决定是否发送状态切换日志。
+fn apply_tick(state: &mut AppState, idle_secs: f64, now: i64) -> (bool, bool) {
+    let was_active = state.is_active;
+    if idle_secs < IDLE_THRESHOLD_SECS as f64 {
+        state.is_active = true;
+        state.idle_started_at = None;
+        let hour_start = hour_start_unix(now);
+        *state
+            .pending_work_seconds_by_hour
+            .entry(hour_start)
+            .or_insert(0) += 1;
+        if now >= state.today_start_unix && now < state.today_end_unix {
+            state.today_work_seconds += 1;
+        }
+    } else if state.idle_started_at.is_none() {
+        // 刚刚越过阈值进入空闲：记录起点
+        state.is_active = false;
+        state.idle_started_at = Some(Instant::now());
+    }
+    (was_active, state.is_active)
+}
+
 // 每秒 tick：若距上次活动 < 60s 则累计工作时长；否则标记为空闲
 fn spawn_ticker(app: AppHandle) {
     std::thread::spawn(move || loop {
@@ -610,29 +760,17 @@ fn spawn_ticker(app: AppHandle) {
                     persisted_work_seconds_in_range(&s.db, today_start, today_end).unwrap_or(0);
             }
 
-            // 系统级空闲检测：若用户在 IDLE_THRESHOLD_SECS 内有过任意键鼠输入，
-            // 视为"活动中"，刷新 last_activity；后续 last_activity.elapsed() 即代表空闲时长
+            // 系统级空闲检测：idle_secs 即用户未操作时长，直接与阈值比较判定活动/空闲
             let idle_secs = system_idle_seconds();
             push_log_message(&app, format!("system_idle_seconds() = {idle_secs:.3}s"));
-            if idle_secs < IDLE_THRESHOLD_SECS as f64 {
-                s.last_activity = Instant::now();
-            }
 
-            let idle = s.last_activity.elapsed();
-            if idle < Duration::from_secs(IDLE_THRESHOLD_SECS) {
-                s.is_active = true;
-                s.idle_started_at = None;
-                let hour_start = hour_start_unix(now);
-                *s.pending_work_seconds_by_hour
-                    .entry(hour_start)
-                    .or_insert(0) += 1;
-                if now >= s.today_start_unix && now < s.today_end_unix {
-                    s.today_work_seconds += 1;
-                }
-            } else if s.idle_started_at.is_none() {
-                // 刚刚越过阈值进入空闲：记录起点
-                s.is_active = false;
-                s.idle_started_at = Some(Instant::now());
+            let (was_active, is_active) = apply_tick(&mut s, idle_secs, now);
+
+            // 状态切换时发送日志到前端
+            if was_active && !is_active {
+                push_log_message(&app, format!("state: active -> idle"));
+            } else if !was_active && is_active {
+                push_log_message(&app, format!("state: idle -> active"));
             }
 
             if s.last_flush_at.elapsed() >= Duration::from_secs(FLUSH_INTERVAL_SECS) {
@@ -743,7 +881,6 @@ pub fn run() {
                 default_settings()
             });
             let state = Arc::new(Mutex::new(AppState {
-                last_activity: Instant::now(),
                 is_active: false,
                 idle_started_at: None,
                 pending_work_seconds_by_hour: HashMap::new(),
