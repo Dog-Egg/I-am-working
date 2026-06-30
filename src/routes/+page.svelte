@@ -62,6 +62,13 @@
     return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
+  function formatDurationMinutes(total: number): string {
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}`;
+  }
+
   function startOfDay(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
   }
@@ -382,10 +389,19 @@
               class="flex min-w-0 flex-1 flex-col items-center justify-end gap-2"
             >
               <div
-                class="w-full max-w-10 rounded-t bg-cyan-400 transition-all"
-                style:height={barHeight(item.seconds)}
-                title={`${item.label} ${formatDuration(item.seconds)}`}
-              ></div>
+                class="group relative flex w-full max-w-10 justify-center"
+                aria-label={`${item.label} ${formatDurationMinutes(item.seconds)}`}
+              >
+                <div
+                  class="pointer-events-none absolute bottom-full mb-2 rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
+                >
+                  {formatDurationMinutes(item.seconds)}
+                </div>
+                <div
+                  class="w-full rounded-t bg-cyan-400 transition-all"
+                  style:height={barHeight(item.seconds)}
+                ></div>
+              </div>
               <span class="h-4 text-[10px] leading-4 text-zinc-500">
                 {item.showLabel ? item.label : ""}
               </span>
