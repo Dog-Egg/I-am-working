@@ -42,6 +42,7 @@
   let settings = $state<AppSettings>({
     show_tray_time: true,
     tray_time_format: "HH:MM",
+    launch_at_login: true,
   });
   let loadRequestId = 0;
   let settingsRequestId = 0;
@@ -413,6 +414,26 @@
       <section
         class="rounded-lg border border-zinc-800 bg-zinc-900/80 p-5 shadow-2xl shadow-black/20"
       >
+        <div
+          class="mb-5 flex flex-wrap items-center justify-between gap-4 border-zinc-800"
+        >
+          <div class="flex items-center gap-4">
+            <span class="text-sm font-medium text-zinc-300">开机自动运行</span>
+            <label class="flex items-center gap-2 text-sm text-zinc-400">
+              <input
+                class="h-4 w-4 accent-cyan-400"
+                type="checkbox"
+                checked={settings.launch_at_login}
+                onchange={(event) =>
+                  void saveSettings({
+                    ...settings,
+                    launch_at_login: event.currentTarget.checked,
+                  })}
+              />
+            </label>
+          </div>
+        </div>
+
         <div
           class="flex flex-wrap items-center justify-between gap-4 border-zinc-800"
         >

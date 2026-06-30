@@ -11,6 +11,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_specta::{Builder as SpectaBuilder, Event as SpectaEvent};
 
 #[derive(Clone, Debug, serde::Serialize, specta::Type)]
@@ -38,6 +39,7 @@ pub enum TrayTimeFormat {
 pub struct AppSettings {
     pub show_tray_time: bool,
     pub tray_time_format: TrayTimeFormat,
+    pub launch_at_login: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
@@ -180,6 +182,7 @@ fn default_settings() -> AppSettings {
     AppSettings {
         show_tray_time: true,
         tray_time_format: TrayTimeFormat::HhMm,
+        launch_at_login: true,
     }
 }
 
@@ -305,6 +308,22 @@ fn update_tray_title(app: &AppHandle, today_work_seconds: u64, settings: &AppSet
     }
 }
 
+fn sync_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    }
+    .map_err(|e| e.to_string())
+}
+
+fn refresh_launch_at_login(app: &AppHandle, settings: &mut AppSettings) {
+    if let Ok(enabled) = app.autolaunch().is_enabled() {
+        settings.launch_at_login = enabled;
+    }
+}
+
 #[specta::specta]
 #[tauri::command]
 fn get_stats(state: State<'_, Arc<Mutex<AppState>>>) -> Stats {
@@ -325,9 +344,11 @@ fn get_work_records(
 
 #[specta::specta]
 #[tauri::command]
-fn get_settings(state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
+fn get_settings(app: AppHandle, state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
     let s = state.lock().unwrap();
-    s.settings.clone()
+    let mut settings = s.settings.clone();
+    refresh_launch_at_login(&app, &mut settings);
+    settings
 }
 
 #[specta::specta]
@@ -339,6 +360,7 @@ fn update_settings(
 ) -> Result<AppSettings, String> {
     let (today_work_seconds, next_settings) = {
         let mut s = state.lock().unwrap();
+        sync_launch_at_login(&app, settings.launch_at_login)?;
         persist_settings(&s.settings_path, &settings).map_err(|e| e.to_string())?;
         s.settings = settings;
         (s.today_work_seconds, s.settings.clone())
@@ -542,6 +564,7 @@ mod tests {
         let settings = AppSettings {
             show_tray_time: false,
             tray_time_format: TrayTimeFormat::HhMmSs,
+            launch_at_login: true,
         };
 
         persist_settings(&path, &settings).unwrap();
@@ -852,6 +875,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "log" {
@@ -875,11 +902,16 @@ pub fn run() {
             let today_work_seconds =
                 persisted_work_seconds_in_range(&db, today_start, today_end).unwrap_or(0);
             let settings_path = app_data_dir.join("settings.json");
-            let settings = load_settings(&settings_path).unwrap_or_else(|_err| {
+            let mut settings = load_settings(&settings_path).unwrap_or_else(|_err| {
                 #[cfg(debug_assertions)]
                 eprintln!("failed to load app settings: {_err}");
                 default_settings()
             });
+            if let Err(err) = sync_launch_at_login(app.handle(), settings.launch_at_login) {
+                #[cfg(debug_assertions)]
+                eprintln!("failed to sync launch at login: {err}");
+                refresh_launch_at_login(app.handle(), &mut settings);
+            }
             let state = Arc::new(Mutex::new(AppState {
                 is_active: false,
                 idle_started_at: None,
