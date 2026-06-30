@@ -9,7 +9,7 @@ use tauri::{
     include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, State, WindowEvent,
+    App, AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_specta::{Builder as SpectaBuilder, Event as SpectaEvent};
 
@@ -47,6 +47,20 @@ pub struct StatsUpdated(pub Stats);
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
 #[serde(transparent)]
 pub struct ShowTab(pub String);
+
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+pub struct LogMessage {
+    pub timestamp: String,
+    pub message: String,
+}
+
+fn push_log_message(app: &AppHandle, message: String) {
+    let _ = LogMessage {
+        timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        message,
+    }
+    .emit(app);
+}
 
 struct AppState {
     last_activity: Instant,
@@ -599,8 +613,7 @@ fn spawn_ticker(app: AppHandle) {
             // 系统级空闲检测：若用户在 IDLE_THRESHOLD_SECS 内有过任意键鼠输入，
             // 视为"活动中"，刷新 last_activity；后续 last_activity.elapsed() 即代表空闲时长
             let idle_secs = system_idle_seconds();
-            // #[cfg(debug_assertions)]
-            // eprintln!("[idle] system_idle_seconds() = {idle_secs:.3}s");
+            push_log_message(&app, format!("system_idle_seconds() = {idle_secs:.3}s"));
             if idle_secs < IDLE_THRESHOLD_SECS as f64 {
                 s.last_activity = Instant::now();
             }
@@ -655,6 +668,22 @@ fn show_tab(app: &AppHandle, tab: &str) {
     let _ = ShowTab(tab.to_string()).emit(app);
 }
 
+fn show_log_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("log") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+
+    if let Err(err) = WebviewWindowBuilder::new(app, "log", WebviewUrl::App("/log".into()))
+        .title("日志")
+        .inner_size(820.0, 600.0)
+        .build()
+    {
+        eprintln!("failed to create log window: {err}");
+    }
+}
+
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
     SpectaBuilder::<tauri::Wry>::new()
         .dangerously_cast_bigints_to_number()
@@ -664,7 +693,11 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
             get_settings,
             update_settings,
         ])
-        .events(tauri_specta::collect_events![StatsUpdated, ShowTab])
+        .events(tauri_specta::collect_events![
+            StatsUpdated,
+            ShowTab,
+            LogMessage
+        ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -682,10 +715,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
-            // 点击窗口关闭按钮时隐藏而非销毁，保留 webview 上下文
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                if window.label() == "log" {
+                    // 日志窗口：直接销毁，下次重新创建以释放内存
+                    api.prevent_close();
+                    let _ = window.destroy();
+                } else {
+                    // 主窗口：隐藏而非销毁，保留 webview 上下文
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(specta.invoke_handler())
@@ -722,11 +761,13 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // 托盘菜单：统计 / 设置 / 退出
+            // 托盘菜单：统计 / 查看日志 / 设置 / 退出
             let stats_item = MenuItem::with_id(app, "stats", "统计", true, None::<&str>)?;
+            let log_item = MenuItem::with_id(app, "log", "查看日志", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&stats_item, &settings_item, &quit_item])?;
+            let menu =
+                Menu::with_items(app, &[&stats_item, &settings_item, &log_item, &quit_item])?;
 
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(include_image!("./icons/icon.png"))
@@ -734,6 +775,7 @@ pub fn run() {
                 .tooltip("I am working")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "stats" => show_tab(app, "stats"),
+                    "log" => show_log_window(app),
                     "settings" => show_tab(app, "settings"),
                     "quit" => {
                         let state = app.state::<Arc<Mutex<AppState>>>();
