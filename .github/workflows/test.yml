@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+          version: 1.0
+
+      - name: Cache Cargo dependencies and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json', 'package-lock.json', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Run tests
+        run: npm run test
