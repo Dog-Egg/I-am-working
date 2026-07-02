@@ -348,7 +348,7 @@
           >
             <svg
               aria-hidden="true"
-              class="h-4 w-4"
+              class="size-3"
               fill="none"
               stroke="currentColor"
               stroke-linecap="round"
