@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { commands, type AppSettings, type TrayTimeFormat } from "$lib/bindings";
+  import {
+    commands,
+    type AppSettings,
+    type TrayTimeFormat,
+  } from "$lib/bindings";
   import { onMount } from "svelte";
 
   const trayTimeFormatOptions: TrayTimeFormat[] = ["HH:MM", "HH:MM:SS"];
@@ -43,10 +47,10 @@
 </script>
 
 <section
-  class="rounded-lg border border-zinc-800 bg-zinc-900/80 p-5 shadow-2xl shadow-black/20"
+  class="rounded-lg border border-zinc-800 bg-zinc-900/80 px-5 shadow-2xl shadow-black/20"
 >
   <div
-    class="mb-5 flex flex-wrap items-center justify-between gap-4 border-zinc-800"
+    class="flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-zinc-800"
   >
     <div class="flex items-center gap-4">
       <span class="text-sm font-medium text-zinc-300">开机自动运行</span>
@@ -65,10 +69,11 @@
     </div>
   </div>
 
-  <div class="flex flex-wrap items-center justify-between gap-4 border-zinc-800">
+  <div
+    class="flex min-h-16 flex-wrap items-center justify-between gap-4 border-zinc-800"
+  >
     <div class="flex items-center gap-4">
-      <span class="text-sm font-medium text-zinc-300"
-        >托盘显示今日工作时长</span
+      <span class="text-sm font-medium text-zinc-300">托盘显示今日工作时长</span
       >
       <label class="flex items-center gap-2 text-sm text-zinc-400">
         <input
@@ -85,7 +90,9 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
-      <div class="grid grid-cols-2 rounded-lg border border-zinc-700 bg-zinc-950 p-1">
+      <div
+        class="grid grid-cols-2 rounded-lg border border-zinc-700 bg-zinc-950 p-1"
+      >
         {#each trayTimeFormatOptions as option}
           <button
             class="rounded-md px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40
