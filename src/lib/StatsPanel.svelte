@@ -454,7 +454,7 @@
           onclick={() => drillDown(item)}
         >
           <div
-            class="pointer-events-none absolute bottom-full mb-2 rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
+            class="z-10 pointer-events-none absolute bottom-full mb-2 rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
           >
             {formatDurationMinutes(item.seconds)}
           </div>
