@@ -1,7 +1,5 @@
-# Tauri + SvelteKit + TypeScript
+# 我真的在工作
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+> *AI 干活的 3 分钟，是我刷手机最快乐的 1 小时。*
 
-## Recommended IDE Setup
-
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+该应用会悄悄记录作为人类的我，每天究竟有几个小时在工作。
