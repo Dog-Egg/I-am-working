@@ -37,6 +37,7 @@
   });
   let activeTab = $state<AppTab>("stats");
   let period = $state<Period>("day");
+  let periodOffset = $state(0);
   let records = $state<HourlyWorkRecord[]>([]);
   let isLoading = $state(false);
   let settings = $state<AppSettings>({
@@ -47,7 +48,10 @@
   let loadRequestId = 0;
   let settingsRequestId = 0;
 
-  let chartData = $derived(buildChartData(period, records));
+  let chartData = $derived(buildChartData(period, records, periodOffset));
+  let periodRangeLabel = $derived(formatPeriodRange(period, periodOffset));
+  let isCurrentPeriod = $derived(periodOffset === 0);
+  let canMoveNextPeriod = $derived(periodOffset < 0);
   let maxSeconds = $derived(
     Math.max(1, ...chartData.map((item) => item.seconds)),
   );
@@ -85,35 +89,84 @@
     return start;
   }
 
-  function getPeriodRange(selected: Period, base = new Date()) {
+  function getPeriodRange(selected: Period, offset = 0, base = new Date()) {
     if (selected === "day") {
-      const start = startOfDay(base);
+      const start = startOfDay(addDays(base, offset));
       return { start, end: addDays(start, 1) };
     }
 
     if (selected === "week") {
-      const start = startOfWeek(base);
+      const start = startOfWeek(addDays(base, offset * 7));
       return { start, end: addDays(start, 7) };
     }
 
     if (selected === "month") {
-      const start = new Date(base.getFullYear(), base.getMonth(), 1);
-      const end = new Date(base.getFullYear(), base.getMonth() + 1, 1);
+      const start = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
       return { start, end };
     }
 
-    const start = new Date(base.getFullYear(), 0, 1);
-    const end = new Date(base.getFullYear() + 1, 0, 1);
+    const start = new Date(base.getFullYear() + offset, 0, 1);
+    const end = new Date(start.getFullYear() + 1, 0, 1);
     return { start, end };
+  }
+
+  function formatDate(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${date.getFullYear()}年${month}月${day}日`;
+  }
+
+  function formatMonth(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${date.getFullYear()}年${month}月`;
+  }
+
+  function formatCompactWeekRange(start: Date, end: Date): string {
+    const endDay = addDays(end, -1);
+    const startText = `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日`;
+
+    if (start.getFullYear() !== endDay.getFullYear()) {
+      return `${startText} - ${endDay.getFullYear()}年${endDay.getMonth() + 1}月${endDay.getDate()}日`;
+    }
+
+    if (start.getMonth() !== endDay.getMonth()) {
+      return `${startText} - ${endDay.getMonth() + 1}月${endDay.getDate()}日`;
+    }
+
+    return `${startText} - ${endDay.getDate()}日`;
+  }
+
+  function formatPeriodRange(selected: Period, offset: number): string {
+    const { start, end } = getPeriodRange(selected, offset);
+
+    if (selected === "day") return formatDate(start);
+    if (selected === "month") return formatMonth(start);
+    if (selected === "year") return `${start.getFullYear()}年`;
+
+    return formatCompactWeekRange(start, end);
+  }
+
+  function selectPeriod(nextPeriod: Period) {
+    period = nextPeriod;
+    periodOffset = 0;
+  }
+
+  function movePeriod(delta: number) {
+    periodOffset = Math.min(0, periodOffset + delta);
+  }
+
+  function resetPeriod() {
+    periodOffset = 0;
   }
 
   function toUnixSeconds(date: Date): number {
     return Math.floor(date.getTime() / 1000);
   }
 
-  async function loadRecords(selected: Period = period) {
+  async function loadRecords(selected: Period = period, offset = periodOffset) {
     const requestId = ++loadRequestId;
-    const { start, end } = getPeriodRange(selected);
+    const { start, end } = getPeriodRange(selected, offset);
     isLoading = true;
 
     try {
@@ -153,8 +206,9 @@
   function buildChartData(
     selected: Period,
     source: HourlyWorkRecord[],
+    offset: number,
   ): ChartBar[] {
-    const { start, end } = getPeriodRange(selected);
+    const { start, end } = getPeriodRange(selected, offset);
 
     if (selected === "day") {
       const bars = Array.from({ length: 24 }, (_, hour) => ({
@@ -244,7 +298,8 @@
 
   $effect(() => {
     const selected = period;
-    void loadRecords(selected);
+    const offset = periodOffset;
+    void loadRecords(selected, offset);
   });
 
   onMount(() => {
@@ -284,7 +339,7 @@
       });
 
     const refreshTimer = window.setInterval(() => {
-      void loadRecords(period);
+      void loadRecords(period, periodOffset);
     }, 60000);
 
     return () => {
@@ -350,7 +405,7 @@
       <section
         class="rounded-lg border border-zinc-800 bg-zinc-900/80 p-5 shadow-2xl shadow-black/20"
       >
-        <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div class="flex items-baseline gap-3">
             <h1 class="text-lg font-semibold text-zinc-100">统计</h1>
             <span class="font-mono text-sm tabular-nums text-zinc-400">
@@ -358,21 +413,98 @@
             </span>
           </div>
 
-          <div
-            class="grid grid-cols-4 rounded-lg border border-zinc-700 bg-zinc-950 p-1"
-          >
-            {#each periodOptions as option}
+          <div class="flex w-[22rem] max-w-full flex-col items-center gap-2">
+            <div
+              class="grid w-full grid-cols-4 rounded-lg border border-zinc-700 bg-zinc-950 p-1"
+            >
+              {#each periodOptions as option}
+                <button
+                  class="rounded-md px-4 py-1.5 text-sm font-medium transition
+                  {period === option.value
+                    ? 'bg-cyan-500 text-zinc-950'
+                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}"
+                  type="button"
+                  onclick={() => selectPeriod(option.value)}
+                >
+                  {option.label}
+                </button>
+              {/each}
+            </div>
+
+            <div class="flex w-full items-center gap-1">
               <button
-                class="rounded-md px-4 py-1.5 text-sm font-medium transition
-                {period === option.value
-                  ? 'bg-cyan-500 text-zinc-950'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}"
+                aria-label="上一周期"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
                 type="button"
-                onclick={() => (period = option.value)}
+                onclick={() => movePeriod(-1)}
               >
-                {option.label}
+                <svg
+                  aria-hidden="true"
+                  class="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
               </button>
-            {/each}
+              <div
+                class="min-w-0 flex-1 flex items-center justify-center gap-2"
+              >
+                <span
+                  class="text-center font-mono text-sm tabular-nums text-zinc-400"
+                >
+                  {periodRangeLabel}
+                </span>
+                <button
+                  aria-label="回到当前周期"
+                  class={[
+                    isCurrentPeriod && "hidden",
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100",
+                  ]}
+                  type="button"
+                  disabled={isCurrentPeriod}
+                  onclick={resetPeriod}
+                >
+                  <svg
+                    aria-hidden="true"
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M3 12a9 9 0 1 0 3-6.7" />
+                    <path d="M3 3v6h6" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                aria-label="下一周期"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-950 disabled:hover:text-zinc-300"
+                type="button"
+                disabled={!canMoveNextPeriod}
+                onclick={() => movePeriod(1)}
+              >
+                <svg
+                  aria-hidden="true"
+                  class="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -381,7 +513,7 @@
         >
           {#if isLoading}
             <div class="absolute right-0 top-0 text-xs text-zinc-500">
-              同步中
+              <!-- 同步中 -->
             </div>
           {/if}
 
