@@ -250,7 +250,7 @@
         return {
           label: String(day),
           seconds: 0,
-          showLabel: day === 1 || day === dayCount || day % 5 === 0,
+          showLabel: day === 1 || day % 5 === 0,
           start: new Date(start.getFullYear(), start.getMonth(), day),
         };
       });
@@ -385,7 +385,9 @@
           </svg>
         </button>
         <div class="min-w-0 flex-1 flex items-center justify-center gap-2">
-          <span class="text-center font-mono text-sm tabular-nums text-zinc-400">
+          <span
+            class="text-center font-mono text-sm tabular-nums text-zinc-400"
+          >
             {periodRangeLabel}
           </span>
           <button
@@ -445,7 +447,9 @@
     {/if}
 
     {#each chartData as item}
-      <div class="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
+      <div
+        class="group/bar flex min-w-0 flex-1 flex-col items-center justify-end gap-2"
+      >
         <button
           class="group relative flex w-full max-w-10 justify-center disabled:cursor-default"
           aria-label={`${item.label} ${formatDurationMinutes(item.seconds)}`}
@@ -463,8 +467,13 @@
             style:height={barHeight(item.seconds)}
           ></div>
         </button>
-        <span class="h-4 text-[10px] leading-4 text-zinc-500">
-          {item.showLabel ? item.label : ""}
+        <span
+          class={[
+            "h-4 text-[10px] leading-4 text-zinc-500 transition-opacity",
+            !item.showLabel && "opacity-0 group-hover/bar:opacity-100",
+          ]}
+        >
+          {item.label}
         </span>
       </div>
     {/each}
