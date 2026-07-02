@@ -8,6 +8,7 @@
     label: string;
     seconds: number;
     showLabel: boolean;
+    start: Date;
   };
 
   const periodOptions: Array<{ value: Period; label: string }> = [
@@ -129,6 +130,26 @@
     periodOffset = 0;
   }
 
+  function selectPeriodRange(nextPeriod: Period, start: Date) {
+    const today = startOfDay(new Date());
+    const targetStart = startOfDay(start);
+
+    if (targetStart > today) return;
+
+    period = nextPeriod;
+
+    if (nextPeriod === "day") {
+      periodOffset = Math.floor(
+        (targetStart.getTime() - today.getTime()) / 86400000,
+      );
+    } else {
+      periodOffset =
+        (targetStart.getFullYear() - today.getFullYear()) * 12 +
+        targetStart.getMonth() -
+        today.getMonth();
+    }
+  }
+
   function movePeriod(delta: number) {
     periodOffset = Math.min(0, periodOffset + delta);
   }
@@ -174,6 +195,12 @@
         label: String(hour).padStart(2, "0"),
         seconds: 0,
         showLabel: hour % 3 === 0,
+        start: new Date(
+          start.getFullYear(),
+          start.getMonth(),
+          start.getDate(),
+          hour,
+        ),
       }));
 
       for (const record of source) {
@@ -188,10 +215,11 @@
 
     if (selected === "week") {
       const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-      const bars = labels.map((label) => ({
+      const bars = labels.map((label, index) => ({
         label,
         seconds: 0,
         showLabel: true,
+        start: addDays(start, index),
       }));
 
       for (const record of source) {
@@ -221,6 +249,7 @@
           label: String(day),
           seconds: 0,
           showLabel: day === 1 || day === dayCount || day % 5 === 0,
+          start: new Date(start.getFullYear(), start.getMonth(), day),
         };
       });
 
@@ -238,6 +267,7 @@
       label: `${month + 1}月`,
       seconds: 0,
       showLabel: true,
+      start: new Date(start.getFullYear(), month, 1),
     }));
 
     for (const record of source) {
@@ -253,6 +283,26 @@
   function barHeight(seconds: number): string {
     if (seconds === 0) return "2px";
     return `${Math.max(8, Math.round((seconds / maxSeconds) * 190))}px`;
+  }
+
+  function getDrilldownPeriod(selected: Period): Period | null {
+    if (selected === "week" || selected === "month") return "day";
+    if (selected === "year") return "month";
+    return null;
+  }
+
+  function canDrillDown(item: ChartBar): boolean {
+    const nextPeriod = getDrilldownPeriod(period);
+    return (
+      nextPeriod !== null && startOfDay(item.start) <= startOfDay(new Date())
+    );
+  }
+
+  function drillDown(item: ChartBar) {
+    const nextPeriod = getDrilldownPeriod(period);
+    if (!nextPeriod) return;
+
+    selectPeriodRange(nextPeriod, item.start);
   }
 
   $effect(() => {
@@ -394,9 +444,12 @@
 
     {#each chartData as item}
       <div class="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
-        <div
-          class="group relative flex w-full max-w-10 justify-center"
+        <button
+          class="group relative flex w-full max-w-10 justify-center disabled:cursor-default"
           aria-label={`${item.label} ${formatDurationMinutes(item.seconds)}`}
+          type="button"
+          disabled={!canDrillDown(item)}
+          onclick={() => drillDown(item)}
         >
           <div
             class="pointer-events-none absolute bottom-full mb-2 rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
@@ -404,10 +457,10 @@
             {formatDurationMinutes(item.seconds)}
           </div>
           <div
-            class="w-full rounded-t bg-cyan-400 transition-all"
+            class="w-full rounded-t bg-cyan-400 transition-all group-enabled:group-hover:bg-cyan-300"
             style:height={barHeight(item.seconds)}
           ></div>
-        </div>
+        </button>
         <span class="h-4 text-[10px] leading-4 text-zinc-500">
           {item.showLabel ? item.label : ""}
         </span>
