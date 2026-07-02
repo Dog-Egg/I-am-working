@@ -46,6 +46,8 @@
   }
 
   function formatDurationMinutes(total: number): string {
+    if (total > 0 && total < 60) return "<00:01";
+
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
     const pad = (n: number) => String(n).padStart(2, "0");
