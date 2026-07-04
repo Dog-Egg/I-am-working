@@ -214,7 +214,7 @@ pub(crate) fn work_records_in_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::time::Instant;
 
     fn test_state() -> AppState {
@@ -223,6 +223,7 @@ mod tests {
 
         AppState {
             is_active: false,
+            active_agents: HashSet::new(),
             idle_started_at: None,
             pending_work_seconds_by_hour: HashMap::new(),
             last_flush_at: Instant::now(),

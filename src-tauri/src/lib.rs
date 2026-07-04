@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use app_state::{spawn_ticker, today_range_unix, AppState};
 use desktop::{create_tray, refresh_launch_at_login, sync_launch_at_login};
+use ipc::spawn_cli_ipc_server;
 use storage::{
     default_settings, init_app_data_dir, init_db, load_settings, persisted_work_seconds_in_range,
 };
@@ -12,8 +13,11 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_specta::Builder as SpectaBuilder;
 
 mod app_state;
+pub mod cli;
 mod commands;
 mod desktop;
+mod ipc;
+mod json_insert;
 mod models;
 mod storage;
 
@@ -25,6 +29,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
             commands::get_work_records,
             commands::get_settings,
             commands::update_settings,
+            commands::install_cli,
         ])
         .events(tauri_specta::collect_events![
             models::StatsUpdated,
@@ -86,6 +91,7 @@ pub fn run() {
             }
             let state = Arc::new(Mutex::new(AppState {
                 is_active: false,
+                active_agents: HashSet::new(),
                 idle_started_at: None,
                 pending_work_seconds_by_hour: HashMap::new(),
                 last_flush_at: Instant::now(),
@@ -103,6 +109,7 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             create_tray(app, today_work_seconds, &settings)?;
+            spawn_cli_ipc_server(app.handle().clone(), app_data_dir, state)?;
             spawn_ticker(app.handle().clone());
 
             Ok(())

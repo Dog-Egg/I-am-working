@@ -14,6 +14,7 @@ use crate::models::{AppSettings, ShowTab, TrayTimeFormat};
 use crate::storage::flush_pending_work;
 
 pub(crate) const TRAY_ID: &str = "work-time";
+pub(crate) const AGENT_TRAY_ID: &str = "agent-status";
 
 pub(crate) fn format_hours_minutes(total_seconds: u64) -> String {
     let hours = total_seconds / 3_600;
@@ -45,6 +46,20 @@ pub(crate) fn update_tray_title(app: &AppHandle, today_work_seconds: u64, settin
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         if let Err(err) = tray.set_title(Some(tray_title(today_work_seconds, settings))) {
             eprintln!("failed to update tray title: {err}");
+        }
+    }
+}
+
+pub(crate) fn update_agent_tray_icon(app: &AppHandle, has_active_agents: bool) {
+    if let Some(tray) = app.tray_by_id(AGENT_TRAY_ID) {
+        let icon = if has_active_agents {
+            include_image!("./icons/agent-on.png")
+        } else {
+            include_image!("./icons/agent-off.png")
+        };
+
+        if let Err(err) = tray.set_icon_with_as_template(Some(icon), true) {
+            eprintln!("failed to update agent tray icon: {err}");
         }
     }
 }
@@ -141,6 +156,10 @@ pub(crate) fn create_tray(
                 toggle_window(tray.app_handle());
             }
         })
+        .build(app)?;
+    let _agent_tray = TrayIconBuilder::with_id(AGENT_TRAY_ID)
+        .icon(include_image!("./icons/agent-off.png"))
+        .icon_as_template(true)
         .build(app)?;
     update_tray_title(app.handle(), today_work_seconds, settings);
 

@@ -14,6 +14,9 @@
     launch_at_login: true,
   });
   let settingsRequestId = 0;
+  let isInstallingCli = $state(false);
+  let cliInstallMessage = $state("");
+  let cliInstallError = $state("");
 
   async function saveSettings(nextSettings: AppSettings) {
     const requestId = ++settingsRequestId;
@@ -44,6 +47,22 @@
       disposed = true;
     };
   });
+
+  async function installCli() {
+    isInstallingCli = true;
+    cliInstallMessage = "";
+    cliInstallError = "";
+
+    const result = await commands.installCli();
+    isInstallingCli = false;
+
+    if (result.status === "ok") {
+      cliInstallMessage = `已安装到 ${result.data}`;
+    } else {
+      cliInstallError = result.error;
+      console.error("failed to install CLI", result.error);
+    }
+  }
 </script>
 
 <section
@@ -112,5 +131,29 @@
         {/each}
       </div>
     </div>
+  </div>
+
+  <div
+    class="flex min-h-16 flex-wrap items-center justify-between gap-4 border-t border-zinc-800 py-3"
+  >
+    <div class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-zinc-300">命令行工具</span>
+      {#if cliInstallMessage}
+        <span class="text-xs text-emerald-300">{cliInstallMessage}</span>
+      {:else if cliInstallError}
+        <span class="text-xs text-red-300">{cliInstallError}</span>
+      {:else}
+        <span class="text-xs text-zinc-500">/usr/local/bin/iaw</span>
+      {/if}
+    </div>
+
+    <button
+      class="rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-medium text-zinc-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+      type="button"
+      disabled={isInstallingCli}
+      onclick={() => void installCli()}
+    >
+      {isInstallingCli ? "安装中" : "安装 CLI"}
+    </button>
   </div>
 </section>

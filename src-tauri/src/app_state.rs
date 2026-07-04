@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -14,6 +14,7 @@ use crate::storage::{flush_pending_work, persisted_work_seconds_in_range};
 
 pub(crate) struct AppState {
     pub(crate) is_active: bool,
+    pub(crate) active_agents: HashSet<String>,
     // 进入空闲状态的瞬间；处于工作状态时为 None
     pub(crate) idle_started_at: Option<Instant>,
     pub(crate) pending_work_seconds_by_hour: HashMap<i64, u64>,
@@ -185,6 +186,7 @@ mod tests {
 
         AppState {
             is_active: false,
+            active_agents: HashSet::new(),
             idle_started_at: None,
             pending_work_seconds_by_hour: HashMap::new(),
             last_flush_at: Instant::now(),
