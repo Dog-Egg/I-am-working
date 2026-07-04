@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{
     include_image,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -61,6 +61,52 @@ pub(crate) fn update_agent_tray_icon(app: &AppHandle, has_active_agents: bool) {
         if let Err(err) = tray.set_icon_with_as_template(Some(icon), true) {
             eprintln!("failed to update agent tray icon: {err}");
         }
+    }
+}
+
+fn agent_tray_menu(app: &AppHandle, active_agents: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+
+    if active_agents.is_empty() {
+        let empty_item =
+            MenuItem::with_id(app, "agent-empty", "No active agents", false, None::<&str>)?;
+        menu.append(&empty_item)?;
+        return Ok(menu);
+    }
+
+    let title_item = MenuItem::with_id(app, "agent-title", "Active agents", false, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    menu.append(&title_item)?;
+    menu.append(&separator)?;
+
+    for (index, agent) in active_agents.iter().enumerate() {
+        let item = MenuItem::with_id(
+            app,
+            format!("agent-active-{index}"),
+            agent,
+            false,
+            None::<&str>,
+        )?;
+        menu.append(&item)?;
+    }
+
+    Ok(menu)
+}
+
+pub(crate) fn update_agent_tray(app: &AppHandle, active_agents: &[String]) {
+    update_agent_tray_icon(app, !active_agents.is_empty());
+
+    let Some(tray) = app.tray_by_id(AGENT_TRAY_ID) else {
+        return;
+    };
+
+    match agent_tray_menu(app, active_agents) {
+        Ok(menu) => {
+            if let Err(err) = tray.set_menu(Some(menu)) {
+                eprintln!("failed to update agent tray menu: {err}");
+            }
+        }
+        Err(err) => eprintln!("failed to build agent tray menu: {err}"),
     }
 }
 
@@ -160,6 +206,7 @@ pub(crate) fn create_tray(
     let _agent_tray = TrayIconBuilder::with_id(AGENT_TRAY_ID)
         .icon(include_image!("./icons/agent-off.png"))
         .icon_as_template(true)
+        .menu(&agent_tray_menu(app.handle(), &[])?)
         .build(app)?;
     update_tray_title(app.handle(), today_work_seconds, settings);
 

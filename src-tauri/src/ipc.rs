@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::app_state::AppState;
 use crate::cli::{ipc_info_path, IpcInfo};
-use crate::desktop::update_agent_tray_icon;
+use crate::desktop::update_agent_tray;
 use tauri::AppHandle;
 
 #[derive(Debug, serde::Deserialize)]
@@ -98,7 +98,7 @@ fn handle_connection(
                     return;
                 }
             };
-            let has_active_agents = {
+            let active_agents = {
                 let mut state = state.lock().unwrap();
                 if agent_status.active {
                     state
@@ -107,10 +107,12 @@ fn handle_connection(
                 } else {
                     state.active_agents.remove(agent_status.agent_name.trim());
                 }
-                !state.active_agents.is_empty()
+                let mut active_agents = state.active_agents.iter().cloned().collect::<Vec<_>>();
+                active_agents.sort();
+                active_agents
             };
 
-            update_agent_tray_icon(app, has_active_agents);
+            update_agent_tray(app, &active_agents);
             write_response(&mut stream, "200 OK", "application/json", "{}\n");
         }
         _ => {
