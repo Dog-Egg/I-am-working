@@ -76,11 +76,6 @@ fn handle_connection(
 
     let request_line = request.lines().next().unwrap_or_default();
     match request_line {
-        "GET /today HTTP/1.1" | "GET /today HTTP/1.0" => {
-            let today_work_seconds = state.lock().unwrap().today_work_seconds;
-            let body = serde_json::json!({ "today_work_seconds": today_work_seconds }).to_string();
-            write_response(&mut stream, "200 OK", "application/json", &(body + "\n"));
-        }
         "POST /agent HTTP/1.1" | "POST /agent HTTP/1.0" => {
             let Some((_headers, body)) = request.split_once("\r\n\r\n") else {
                 write_response(
@@ -178,14 +173,14 @@ mod tests {
 
     #[test]
     fn is_authorized_accepts_bearer_token() {
-        let request = "GET /today HTTP/1.1\r\nAuthorization: Bearer abc123\r\n\r\n";
+        let request = "POST /agent HTTP/1.1\r\nAuthorization: Bearer abc123\r\n\r\n";
 
         assert!(is_authorized(request, "abc123"));
     }
 
     #[test]
     fn is_authorized_rejects_wrong_token() {
-        let request = "GET /today HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n";
+        let request = "POST /agent HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n";
 
         assert!(!is_authorized(request, "abc123"));
     }
