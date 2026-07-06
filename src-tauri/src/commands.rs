@@ -62,6 +62,18 @@ pub(crate) fn install_cli(app: AppHandle) -> Result<String, String> {
     install_cli_inner(&app).map(|path| path.display().to_string())
 }
 
+#[specta::specta]
+#[tauri::command]
+pub(crate) fn is_cli_installed() -> Result<bool, String> {
+    is_cli_installed_inner()
+}
+
+#[specta::specta]
+#[tauri::command]
+pub(crate) fn uninstall_cli() -> Result<String, String> {
+    uninstall_cli_inner().map(|path| path.display().to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let source =
@@ -81,6 +93,37 @@ fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
 #[cfg(not(target_os = "macos"))]
 fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Err("CLI installation is only implemented on macOS for now".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn is_cli_installed_inner() -> Result<bool, String> {
+    let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
+
+    is_cli_symlink_installed(&destination).map_err(|err| err.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_cli_installed_inner() -> Result<bool, String> {
+    Err("CLI installation status is only implemented on macOS for now".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
+    let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
+
+    match uninstall_cli_symlink(&destination) {
+        Ok(()) => Ok(destination),
+        Err(err) if is_permission_error(&err) => {
+            uninstall_cli_symlink_with_admin(&destination)?;
+            Ok(destination)
+        }
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
+    Err("CLI uninstallation is only implemented on macOS for now".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -113,6 +156,38 @@ fn install_cli_symlink(
 }
 
 #[cfg(target_os = "macos")]
+fn is_cli_symlink_installed(destination: &std::path::Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "{} already exists and is not a symlink",
+                destination.display()
+            ),
+        )),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_cli_symlink(destination: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(destination),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "{} already exists and is not a symlink",
+                destination.display()
+            ),
+        )),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn install_cli_symlink_with_admin(
     source: &std::path::Path,
     destination: &std::path::Path,
@@ -123,6 +198,31 @@ fn install_cli_symlink_with_admin(
         shell_quote(destination.as_os_str()),
         shell_quote(destination.as_os_str()),
         shell_quote(source.as_os_str()),
+        shell_quote(destination.as_os_str())
+    );
+    let apple_script = format!(
+        "do shell script {} with administrator privileges",
+        apple_script_quote(&script)
+    );
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(apple_script)
+        .output()
+        .map_err(|err| format!("failed to request administrator privileges: {err}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_cli_symlink_with_admin(destination: &std::path::Path) -> Result<(), String> {
+    let script = format!(
+        "set -e; if [ -e {} ] && [ ! -L {} ]; then echo 'destination exists and is not a symlink' >&2; exit 17; fi; rm -f {}",
+        shell_quote(destination.as_os_str()),
+        shell_quote(destination.as_os_str()),
         shell_quote(destination.as_os_str())
     );
     let apple_script = format!(

@@ -14,7 +14,8 @@
     launch_at_login: true,
   });
   let settingsRequestId = 0;
-  let isInstallingCli = $state(false);
+  let isCliInstalled = $state<boolean | null>(null);
+  let cliAction = $state<"install" | "uninstall" | null>(null);
   let cliInstallMessage = $state("");
   let cliInstallError = $state("");
 
@@ -36,12 +37,25 @@
     }
   }
 
+  async function refreshCliStatus() {
+    const result = await commands.isCliInstalled();
+
+    if (result.status === "ok") {
+      isCliInstalled = result.data;
+    } else {
+      isCliInstalled = null;
+      cliInstallError = result.error;
+      console.error("failed to check CLI installation status", result.error);
+    }
+  }
+
   onMount(() => {
     let disposed = false;
 
     void commands.getSettings().then((nextSettings) => {
       if (!disposed) settings = nextSettings;
     });
+    void refreshCliStatus();
 
     return () => {
       disposed = true;
@@ -49,18 +63,42 @@
   });
 
   async function installCli() {
-    isInstallingCli = true;
+    cliAction = "install";
     cliInstallMessage = "";
     cliInstallError = "";
 
-    const result = await commands.installCli();
-    isInstallingCli = false;
+    try {
+      const result = await commands.installCli();
 
-    if (result.status === "ok") {
-      cliInstallMessage = `已安装到 ${result.data}`;
-    } else {
-      cliInstallError = result.error;
-      console.error("failed to install CLI", result.error);
+      if (result.status === "ok") {
+        isCliInstalled = true;
+        cliInstallMessage = `已安装到 ${result.data}`;
+      } else {
+        cliInstallError = result.error;
+        console.error("failed to install CLI", result.error);
+      }
+    } finally {
+      cliAction = null;
+    }
+  }
+
+  async function uninstallCli() {
+    cliAction = "uninstall";
+    cliInstallMessage = "";
+    cliInstallError = "";
+
+    try {
+      const result = await commands.uninstallCli();
+
+      if (result.status === "ok") {
+        isCliInstalled = false;
+        cliInstallMessage = `已卸载 ${result.data}`;
+      } else {
+        cliInstallError = result.error;
+        console.error("failed to uninstall CLI", result.error);
+      }
+    } finally {
+      cliAction = null;
     }
   }
 </script>
@@ -142,18 +180,35 @@
         <span class="text-xs text-emerald-300">{cliInstallMessage}</span>
       {:else if cliInstallError}
         <span class="text-xs text-red-300">{cliInstallError}</span>
+      {:else if isCliInstalled === true}
+        <span class="text-xs text-zinc-500">已安装 /usr/local/bin/iaw</span>
+      {:else if isCliInstalled === false}
+        <span class="text-xs text-zinc-500">未安装 /usr/local/bin/iaw</span>
       {:else}
-        <span class="text-xs text-zinc-500">/usr/local/bin/iaw</span>
+        <span class="text-xs text-zinc-500">正在检查 /usr/local/bin/iaw</span>
       {/if}
     </div>
 
-    <button
-      class="rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-medium text-zinc-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-      type="button"
-      disabled={isInstallingCli}
-      onclick={() => void installCli()}
-    >
-      {isInstallingCli ? "安装中" : "安装 CLI"}
-    </button>
+    <div class="flex flex-wrap items-center gap-2">
+      {#if isCliInstalled}
+        <button
+          class="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          disabled={cliAction !== null}
+          onclick={() => void uninstallCli()}
+        >
+          {cliAction === "uninstall" ? "卸载中" : "卸载 CLI"}
+        </button>
+      {:else}
+        <button
+          class="rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-medium text-zinc-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          disabled={isCliInstalled === null || cliAction !== null}
+          onclick={() => void installCli()}
+        >
+          {cliAction === "install" ? "安装中" : "安装 CLI"}
+        </button>
+      {/if}
+    </div>
   </div>
 </section>

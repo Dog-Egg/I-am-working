@@ -30,6 +30,8 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
             commands::get_settings,
             commands::update_settings,
             commands::install_cli,
+            commands::is_cli_installed,
+            commands::uninstall_cli,
         ])
         .events(tauri_specta::collect_events![
             models::StatsUpdated,
