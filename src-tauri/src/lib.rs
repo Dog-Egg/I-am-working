@@ -19,6 +19,7 @@ mod desktop;
 mod ipc;
 mod json_insert;
 mod models;
+mod power;
 mod storage;
 
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
@@ -116,8 +117,13 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                power::stop_sleep_guard();
+            }
+        });
 }
 
 #[cfg(test)]

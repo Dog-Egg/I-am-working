@@ -11,6 +11,7 @@ use tauri_specta::Event as SpectaEvent;
 
 use crate::app_state::AppState;
 use crate::models::{AppSettings, ShowTab, TrayTimeFormat};
+use crate::power::stop_sleep_guard;
 use crate::storage::flush_pending_work;
 
 pub(crate) const TRAY_ID: &str = "work-time";
@@ -188,6 +189,7 @@ pub(crate) fn create_tray(
                         eprintln!("failed to flush work stats before quit: {err}");
                     }
                 }
+                stop_sleep_guard();
                 app.exit(0);
             }
             _ => {}

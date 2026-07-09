@@ -7,6 +7,7 @@ use std::time::Duration;
 use crate::app_state::AppState;
 use crate::cli::{ipc_info_path, IpcInfo};
 use crate::desktop::update_agent_tray;
+use crate::power::sync_sleep_guard;
 use tauri::AppHandle;
 
 #[derive(Debug, serde::Deserialize)]
@@ -113,6 +114,7 @@ fn handle_connection(
             };
 
             update_agent_tray(app, &active_agents);
+            sync_sleep_guard(!active_agents.is_empty());
             write_response(&mut stream, "200 OK", "application/json", "{}\n");
         }
         _ => {
