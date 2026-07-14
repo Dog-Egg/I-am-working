@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -6,14 +7,33 @@ use std::time::Duration;
 
 use crate::app_state::AppState;
 use crate::cli::{ipc_info_path, IpcInfo};
-use crate::desktop::update_agent_tray;
-use crate::power::sync_sleep_guard;
+use crate::desktop::update_nosleep_tray;
+use crate::nosleep::sync_sleep_inhibitor;
 use tauri::AppHandle;
 
 #[derive(Debug, serde::Deserialize)]
-struct AgentStatusRequest {
-    agent_name: String,
+struct NosleepRequest {
+    name: String,
     active: bool,
+}
+
+fn apply_guard_status(
+    enabled: bool,
+    active_guards: &mut HashSet<String>,
+    request: &NosleepRequest,
+) -> Result<Vec<String>, &'static str> {
+    if !enabled {
+        return Err("nosleep is disabled in settings\n");
+    }
+
+    if request.active {
+        active_guards.insert(request.name.trim().to_string());
+    } else {
+        active_guards.remove(request.name.trim());
+    }
+    let mut active_guards = active_guards.iter().cloned().collect::<Vec<_>>();
+    active_guards.sort();
+    Ok(active_guards)
 }
 
 pub(crate) fn spawn_cli_ipc_server(
@@ -77,7 +97,7 @@ fn handle_connection(
 
     let request_line = request.lines().next().unwrap_or_default();
     match request_line {
-        "POST /agent HTTP/1.1" | "POST /agent HTTP/1.0" => {
+        "POST /nosleep HTTP/1.1" | "POST /nosleep HTTP/1.0" => {
             let Some((_headers, body)) = request.split_once("\r\n\r\n") else {
                 write_response(
                     &mut stream,
@@ -87,34 +107,32 @@ fn handle_connection(
                 );
                 return;
             };
-            let agent_status = match serde_json::from_str::<AgentStatusRequest>(body.trim()) {
-                Ok(agent_status) if !agent_status.agent_name.trim().is_empty() => agent_status,
+            let nosleep = match serde_json::from_str::<NosleepRequest>(body.trim()) {
+                Ok(nosleep) if !nosleep.name.trim().is_empty() => nosleep,
                 _ => {
                     write_response(
                         &mut stream,
                         "400 Bad Request",
                         "text/plain",
-                        "invalid agent status request\n",
+                        "invalid nosleep request\n",
                     );
                     return;
                 }
             };
-            let active_agents = {
+            let active_guards = {
                 let mut state = state.lock().unwrap();
-                if agent_status.active {
-                    state
-                        .active_agents
-                        .insert(agent_status.agent_name.trim().to_string());
-                } else {
-                    state.active_agents.remove(agent_status.agent_name.trim());
+                let enabled = state.settings.nosleep_enabled;
+                match apply_guard_status(enabled, &mut state.active_guards, &nosleep) {
+                    Ok(active_guards) => active_guards,
+                    Err(message) => {
+                        write_response(&mut stream, "409 Conflict", "text/plain", message);
+                        return;
+                    }
                 }
-                let mut active_agents = state.active_agents.iter().cloned().collect::<Vec<_>>();
-                active_agents.sort();
-                active_agents
             };
 
-            update_agent_tray(app, &active_agents);
-            sync_sleep_guard(!active_agents.is_empty());
+            update_nosleep_tray(app, &active_guards);
+            sync_sleep_inhibitor(!active_guards.is_empty());
             write_response(&mut stream, "200 OK", "application/json", "{}\n");
         }
         _ => {
@@ -177,15 +195,41 @@ mod tests {
 
     #[test]
     fn is_authorized_accepts_bearer_token() {
-        let request = "POST /agent HTTP/1.1\r\nAuthorization: Bearer abc123\r\n\r\n";
+        let request = "POST /nosleep HTTP/1.1\r\nAuthorization: Bearer abc123\r\n\r\n";
 
         assert!(is_authorized(request, "abc123"));
     }
 
     #[test]
     fn is_authorized_rejects_wrong_token() {
-        let request = "POST /agent HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n";
+        let request = "POST /nosleep HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n";
 
         assert!(!is_authorized(request, "abc123"));
+    }
+
+    #[test]
+    fn guard_status_is_rejected_when_nosleep_is_disabled() {
+        let mut active_guards = HashSet::new();
+        let request = NosleepRequest {
+            name: "codex".to_string(),
+            active: true,
+        };
+
+        assert!(apply_guard_status(false, &mut active_guards, &request).is_err());
+        assert!(active_guards.is_empty());
+    }
+
+    #[test]
+    fn guard_status_updates_and_sorts_active_names() {
+        let mut active_guards = HashSet::from(["zed".to_string()]);
+        let request = NosleepRequest {
+            name: " codex ".to_string(),
+            active: true,
+        };
+
+        assert_eq!(
+            apply_guard_status(true, &mut active_guards, &request).unwrap(),
+            vec!["codex".to_string(), "zed".to_string()]
+        );
     }
 }

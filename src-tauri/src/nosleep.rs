@@ -1,43 +1,43 @@
 use std::sync::{Mutex, OnceLock};
 
-static SLEEP_GUARD: OnceLock<Mutex<Option<SleepGuard>>> = OnceLock::new();
+static SLEEP_INHIBITOR: OnceLock<Mutex<Option<SleepInhibitor>>> = OnceLock::new();
 
-fn sleep_guard() -> &'static Mutex<Option<SleepGuard>> {
-    SLEEP_GUARD.get_or_init(|| Mutex::new(None))
+fn sleep_inhibitor() -> &'static Mutex<Option<SleepInhibitor>> {
+    SLEEP_INHIBITOR.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn sync_sleep_guard(should_keep_awake: bool) {
+pub(crate) fn sync_sleep_inhibitor(should_keep_awake: bool) {
     if should_keep_awake {
-        start_sleep_guard();
+        start_sleep_inhibitor();
     } else {
-        stop_sleep_guard();
+        stop_sleep_inhibitor();
     }
 }
 
-fn start_sleep_guard() {
-    let mut guard = sleep_guard().lock().unwrap();
-    if guard.is_some() {
+fn start_sleep_inhibitor() {
+    let mut inhibitor = sleep_inhibitor().lock().unwrap();
+    if inhibitor.is_some() {
         return;
     }
 
-    match SleepGuard::new() {
-        Ok(sleep_guard) => {
-            *guard = Some(sleep_guard);
+    match SleepInhibitor::new() {
+        Ok(sleep_inhibitor) => {
+            *inhibitor = Some(sleep_inhibitor);
         }
-        Err(err) => eprintln!("failed to start sleep guard: {err}"),
+        Err(err) => eprintln!("failed to start sleep inhibitor: {err}"),
     }
 }
 
-pub(crate) fn stop_sleep_guard() {
-    let mut guard = sleep_guard().lock().unwrap();
-    *guard = None;
+pub(crate) fn stop_sleep_inhibitor() {
+    let mut inhibitor = sleep_inhibitor().lock().unwrap();
+    *inhibitor = None;
 }
 
-struct SleepGuard {
+struct SleepInhibitor {
     assertion_id: PlatformAssertionId,
 }
 
-impl SleepGuard {
+impl SleepInhibitor {
     fn new() -> Result<Self, String> {
         Ok(Self {
             assertion_id: create_platform_assertion()?,
@@ -45,7 +45,7 @@ impl SleepGuard {
     }
 }
 
-impl Drop for SleepGuard {
+impl Drop for SleepInhibitor {
     fn drop(&mut self) {
         release_platform_assertion(self.assertion_id);
     }
@@ -69,7 +69,7 @@ type PlatformAssertionId = ();
 
 #[cfg(not(target_os = "macos"))]
 fn create_platform_assertion() -> Result<PlatformAssertionId, String> {
-    Err("sleep guard is only implemented on macOS".to_string())
+    Err("sleep inhibitor is only implemented on macOS".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -90,7 +90,7 @@ mod macos {
     const K_IOPM_ASSERTION_LEVEL_ON: IOPMAssertionLevel = 255;
     const K_IO_RETURN_SUCCESS: IOReturn = 0;
     const PREVENT_USER_IDLE_SYSTEM_SLEEP: &str = "PreventUserIdleSystemSleep";
-    const ASSERTION_NAME: &str = "I am working active agents";
+    const ASSERTION_NAME: &str = "nosleep";
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
@@ -139,7 +139,7 @@ mod macos {
     pub(super) fn release_assertion(assertion_id: IOPMAssertionID) {
         let result = unsafe { IOPMAssertionRelease(assertion_id) };
         if result != K_IO_RETURN_SUCCESS {
-            eprintln!("failed to release sleep guard assertion: {result}");
+            eprintln!("failed to release sleep inhibitor assertion: {result}");
         }
     }
 

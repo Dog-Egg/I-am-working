@@ -3,11 +3,23 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 
 use crate::app_state::{build_stats, AppState};
-use crate::desktop::{refresh_launch_at_login, sync_launch_at_login, update_tray_title};
+use crate::desktop::{
+    create_nosleep_tray, refresh_launch_at_login, remove_nosleep_tray, sync_launch_at_login,
+    update_tray_title,
+};
 use crate::models::{AppSettings, HourlyWorkRecord, Stats};
 use crate::storage::{persist_settings, work_records_in_range};
 
 const CLI_INSTALL_PATH: &str = "/usr/local/bin/iaw";
+
+pub(crate) fn sync_nosleep_cli(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    if enabled {
+        install_cli_inner(app)?;
+    } else {
+        uninstall_cli_inner()?;
+    }
+    Ok(())
+}
 
 #[specta::specta]
 #[tauri::command]
@@ -43,35 +55,54 @@ pub(crate) fn update_settings(
     state: State<'_, Arc<Mutex<AppState>>>,
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
-    let (today_work_seconds, next_settings) = {
+    let should_enable_nosleep = settings.nosleep_enabled;
+    let was_nosleep_enabled = state.lock().unwrap().settings.nosleep_enabled;
+    if should_enable_nosleep != was_nosleep_enabled {
+        if should_enable_nosleep {
+            sync_nosleep_cli(&app, true)?;
+            if let Err(err) = create_nosleep_tray(&app) {
+                let _ = uninstall_cli_inner();
+                return Err(err.to_string());
+            }
+        } else {
+            sync_nosleep_cli(&app, false)?;
+        }
+    }
+
+    let settings_result = (|| {
         let mut s = state.lock().unwrap();
         sync_launch_at_login(&app, settings.launch_at_login)?;
         persist_settings(&s.settings_path, &settings).map_err(|e| e.to_string())?;
         s.settings = settings;
-        (s.today_work_seconds, s.settings.clone())
+        Ok::<_, String>((s.today_work_seconds, s.settings.clone()))
+    })();
+
+    let (today_work_seconds, next_settings) = match settings_result {
+        Ok(result) => result,
+        Err(err) => {
+            if should_enable_nosleep != was_nosleep_enabled {
+                if should_enable_nosleep {
+                    remove_nosleep_tray(&app);
+                    let _ = sync_nosleep_cli(&app, false);
+                } else {
+                    let _ = sync_nosleep_cli(&app, true);
+                    let _ = create_nosleep_tray(&app);
+                }
+            }
+            return Err(err);
+        }
     };
 
     update_tray_title(&app, today_work_seconds, &next_settings);
+    if was_nosleep_enabled && !next_settings.nosleep_enabled {
+        if let Ok(mut state) = state.lock() {
+            state.active_guards.clear();
+        }
+        crate::nosleep::stop_sleep_inhibitor();
+        remove_nosleep_tray(&app);
+    }
 
     Ok(next_settings)
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn install_cli(app: AppHandle) -> Result<String, String> {
-    install_cli_inner(&app).map(|path| path.display().to_string())
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn is_cli_installed() -> Result<bool, String> {
-    is_cli_installed_inner()
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn uninstall_cli() -> Result<String, String> {
-    uninstall_cli_inner().map(|path| path.display().to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -96,25 +127,15 @@ fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn is_cli_installed_inner() -> Result<bool, String> {
-    let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
-
-    is_cli_symlink_installed(&destination).map_err(|err| err.to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn is_cli_installed_inner() -> Result<bool, String> {
-    Err("CLI installation status is only implemented on macOS for now".to_string())
-}
-
-#[cfg(target_os = "macos")]
 fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
+    let source =
+        std::env::current_exe().map_err(|err| format!("failed to locate app executable: {err}"))?;
     let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
 
-    match uninstall_cli_symlink(&destination) {
+    match uninstall_cli_symlink(&source, &destination) {
         Ok(()) => Ok(destination),
         Err(err) if is_permission_error(&err) => {
-            uninstall_cli_symlink_with_admin(&destination)?;
+            uninstall_cli_symlink_with_admin(&source, &destination)?;
             Ok(destination)
         }
         Err(err) => Err(err.to_string()),
@@ -137,17 +158,12 @@ fn install_cli_symlink(
 
     match std::fs::symlink_metadata(destination) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            std::fs::remove_file(destination)?;
+            if std::fs::read_link(destination)? == source {
+                return Ok(());
+            }
+            return Err(cli_path_conflict(destination));
         }
-        Ok(_) => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!(
-                    "{} already exists and is not a symlink",
-                    destination.display()
-                ),
-            ));
-        }
+        Ok(_) => return Err(cli_path_conflict(destination)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(err),
     }
@@ -156,35 +172,32 @@ fn install_cli_symlink(
 }
 
 #[cfg(target_os = "macos")]
-fn is_cli_symlink_installed(destination: &std::path::Path) -> std::io::Result<bool> {
+fn uninstall_cli_symlink(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
     match std::fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Ok(true),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!(
-                "{} already exists and is not a symlink",
-                destination.display()
-            ),
-        )),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if std::fs::read_link(destination)? != source {
+                return Err(cli_path_conflict(destination));
+            }
+            std::fs::remove_file(destination)
+        }
+        Ok(_) => Err(cli_path_conflict(destination)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
     }
 }
 
 #[cfg(target_os = "macos")]
-fn uninstall_cli_symlink(destination: &std::path::Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(destination),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!(
-                "{} already exists and is not a symlink",
-                destination.display()
-            ),
-        )),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
+fn cli_path_conflict(destination: &std::path::Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!(
+            "{} already exists and is not managed by this application",
+            destination.display()
+        ),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -193,9 +206,11 @@ fn install_cli_symlink_with_admin(
     destination: &std::path::Path,
 ) -> Result<(), String> {
     let script = format!(
-        "set -e; mkdir -p {}; if [ -e {} ] && [ ! -L {} ]; then echo 'destination exists and is not a symlink' >&2; exit 17; fi; ln -sfn {} {}",
+        "set -e; mkdir -p {}; if [ -L {} ]; then [ \"$(readlink {})\" = {} ] || {{ echo 'destination is not managed by this application' >&2; exit 17; }}; exit 0; fi; if [ -e {} ]; then echo 'destination is not managed by this application' >&2; exit 17; fi; ln -s {} {}",
         shell_quote(destination.parent().unwrap_or_else(|| std::path::Path::new("/")).as_os_str()),
         shell_quote(destination.as_os_str()),
+        shell_quote(destination.as_os_str()),
+        shell_quote(source.as_os_str()),
         shell_quote(destination.as_os_str()),
         shell_quote(source.as_os_str()),
         shell_quote(destination.as_os_str())
@@ -218,10 +233,15 @@ fn install_cli_symlink_with_admin(
 }
 
 #[cfg(target_os = "macos")]
-fn uninstall_cli_symlink_with_admin(destination: &std::path::Path) -> Result<(), String> {
+fn uninstall_cli_symlink_with_admin(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
     let script = format!(
-        "set -e; if [ -e {} ] && [ ! -L {} ]; then echo 'destination exists and is not a symlink' >&2; exit 17; fi; rm -f {}",
+        "set -e; if [ -L {} ]; then [ \"$(readlink {})\" = {} ] || {{ echo 'destination is not managed by this application' >&2; exit 17; }}; rm -f {}; elif [ -e {} ]; then echo 'destination is not managed by this application' >&2; exit 17; fi",
         shell_quote(destination.as_os_str()),
+        shell_quote(destination.as_os_str()),
+        shell_quote(source.as_os_str()),
         shell_quote(destination.as_os_str()),
         shell_quote(destination.as_os_str())
     );
@@ -266,6 +286,20 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::*;
 
+    #[cfg(target_os = "macos")]
+    fn test_cli_paths(test_name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "iaw-{test_name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        (directory.join("app"), directory.join("iaw"))
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
     fn shell_quote_wraps_and_escapes_single_quotes() {
@@ -279,5 +313,45 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn apple_script_quote_wraps_and_escapes_double_quotes() {
         assert_eq!(apple_script_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn install_cli_does_not_replace_foreign_symlink() {
+        let (source, destination) = test_cli_paths("install-conflict");
+        let foreign_source = source.with_file_name("foreign-app");
+        std::os::unix::fs::symlink(&foreign_source, &destination).unwrap();
+
+        let error = install_cli_symlink(&source, &destination).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_link(&destination).unwrap(), foreign_source);
+        std::fs::remove_dir_all(destination.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn uninstall_cli_only_removes_owned_symlink() {
+        let (source, destination) = test_cli_paths("uninstall-owned");
+        std::os::unix::fs::symlink(&source, &destination).unwrap();
+
+        uninstall_cli_symlink(&source, &destination).unwrap();
+
+        assert!(!destination.exists());
+        std::fs::remove_dir_all(destination.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn uninstall_cli_preserves_foreign_symlink() {
+        let (source, destination) = test_cli_paths("uninstall-conflict");
+        let foreign_source = source.with_file_name("foreign-app");
+        std::os::unix::fs::symlink(&foreign_source, &destination).unwrap();
+
+        let error = uninstall_cli_symlink(&source, &destination).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_link(&destination).unwrap(), foreign_source);
+        std::fs::remove_dir_all(destination.parent().unwrap()).unwrap();
     }
 }

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use app_state::{spawn_ticker, today_range_unix, AppState};
+use commands::sync_nosleep_cli;
 use desktop::{create_tray, refresh_launch_at_login, sync_launch_at_login};
 use ipc::spawn_cli_ipc_server;
 use storage::{
@@ -19,7 +20,7 @@ mod desktop;
 mod ipc;
 mod json_insert;
 mod models;
-mod power;
+mod nosleep;
 mod storage;
 
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
@@ -30,9 +31,6 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
             commands::get_work_records,
             commands::get_settings,
             commands::update_settings,
-            commands::install_cli,
-            commands::is_cli_installed,
-            commands::uninstall_cli,
         ])
         .events(tauri_specta::collect_events![
             models::StatsUpdated,
@@ -94,7 +92,7 @@ pub fn run() {
             }
             let state = Arc::new(Mutex::new(AppState {
                 is_active: false,
-                active_agents: HashSet::new(),
+                active_guards: HashSet::new(),
                 idle_started_at: None,
                 pending_work_seconds_by_hour: HashMap::new(),
                 last_flush_at: Instant::now(),
@@ -111,6 +109,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            if let Err(err) = sync_nosleep_cli(app.handle(), settings.nosleep_enabled) {
+                eprintln!("failed to sync nosleep CLI installation: {err}");
+            }
             create_tray(app, today_work_seconds, &settings)?;
             spawn_cli_ipc_server(app.handle().clone(), app_data_dir, state)?;
             spawn_ticker(app.handle().clone());
@@ -121,7 +122,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                power::stop_sleep_guard();
+                nosleep::stop_sleep_inhibitor();
             }
         });
 }

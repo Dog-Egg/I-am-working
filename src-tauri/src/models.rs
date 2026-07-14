@@ -24,6 +24,8 @@ pub struct AppSettings {
     pub show_tray_time: bool,
     pub tray_time_format: TrayTimeFormat,
     pub launch_at_login: bool,
+    #[serde(default)]
+    pub nosleep_enabled: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]

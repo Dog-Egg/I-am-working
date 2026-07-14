@@ -11,11 +11,11 @@ use tauri_specta::Event as SpectaEvent;
 
 use crate::app_state::AppState;
 use crate::models::{AppSettings, ShowTab, TrayTimeFormat};
-use crate::power::stop_sleep_guard;
+use crate::nosleep::stop_sleep_inhibitor;
 use crate::storage::flush_pending_work;
 
 pub(crate) const TRAY_ID: &str = "work-time";
-pub(crate) const AGENT_TRAY_ID: &str = "agent-status";
+pub(crate) const NOSLEEP_TRAY_ID: &str = "nosleep-status";
 
 pub(crate) fn format_hours_minutes(total_seconds: u64) -> String {
     let hours = total_seconds / 3_600;
@@ -51,40 +51,40 @@ pub(crate) fn update_tray_title(app: &AppHandle, today_work_seconds: u64, settin
     }
 }
 
-pub(crate) fn update_agent_tray_icon(app: &AppHandle, has_active_agents: bool) {
-    if let Some(tray) = app.tray_by_id(AGENT_TRAY_ID) {
-        let icon = if has_active_agents {
-            include_image!("./icons/agent-on.png")
+pub(crate) fn update_nosleep_tray_icon(app: &AppHandle, has_active_guards: bool) {
+    if let Some(tray) = app.tray_by_id(NOSLEEP_TRAY_ID) {
+        let icon = if has_active_guards {
+            include_image!("./icons/nosleep-on.png")
         } else {
-            include_image!("./icons/agent-off.png")
+            include_image!("./icons/nosleep-off.png")
         };
 
         if let Err(err) = tray.set_icon_with_as_template(Some(icon), true) {
-            eprintln!("failed to update agent tray icon: {err}");
+            eprintln!("failed to update nosleep tray icon: {err}");
         }
     }
 }
 
-fn agent_tray_menu(app: &AppHandle, active_agents: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
+fn nosleep_tray_menu(app: &AppHandle, active_guards: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
 
-    if active_agents.is_empty() {
+    if active_guards.is_empty() {
         let empty_item =
-            MenuItem::with_id(app, "agent-empty", "No active agents", false, None::<&str>)?;
+            MenuItem::with_id(app, "guard-empty", "No active guards", false, None::<&str>)?;
         menu.append(&empty_item)?;
         return Ok(menu);
     }
 
-    let title_item = MenuItem::with_id(app, "agent-title", "Active agents", false, None::<&str>)?;
+    let title_item = MenuItem::with_id(app, "guard-title", "Active guards", false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     menu.append(&title_item)?;
     menu.append(&separator)?;
 
-    for (index, agent) in active_agents.iter().enumerate() {
+    for (index, guard) in active_guards.iter().enumerate() {
         let item = MenuItem::with_id(
             app,
-            format!("agent-active-{index}"),
-            agent,
+            format!("guard-active-{index}"),
+            guard,
             false,
             None::<&str>,
         )?;
@@ -94,21 +94,38 @@ fn agent_tray_menu(app: &AppHandle, active_agents: &[String]) -> tauri::Result<M
     Ok(menu)
 }
 
-pub(crate) fn update_agent_tray(app: &AppHandle, active_agents: &[String]) {
-    update_agent_tray_icon(app, !active_agents.is_empty());
+pub(crate) fn update_nosleep_tray(app: &AppHandle, active_guards: &[String]) {
+    update_nosleep_tray_icon(app, !active_guards.is_empty());
 
-    let Some(tray) = app.tray_by_id(AGENT_TRAY_ID) else {
+    let Some(tray) = app.tray_by_id(NOSLEEP_TRAY_ID) else {
         return;
     };
 
-    match agent_tray_menu(app, active_agents) {
+    match nosleep_tray_menu(app, active_guards) {
         Ok(menu) => {
             if let Err(err) = tray.set_menu(Some(menu)) {
-                eprintln!("failed to update agent tray menu: {err}");
+                eprintln!("failed to update nosleep tray menu: {err}");
             }
         }
-        Err(err) => eprintln!("failed to build agent tray menu: {err}"),
+        Err(err) => eprintln!("failed to build nosleep tray menu: {err}"),
     }
+}
+
+pub(crate) fn create_nosleep_tray(app: &AppHandle) -> tauri::Result<()> {
+    if app.tray_by_id(NOSLEEP_TRAY_ID).is_some() {
+        return Ok(());
+    }
+
+    TrayIconBuilder::with_id(NOSLEEP_TRAY_ID)
+        .icon(include_image!("./icons/nosleep-off.png"))
+        .icon_as_template(true)
+        .menu(&nosleep_tray_menu(app, &[])?)
+        .build(app)?;
+    Ok(())
+}
+
+pub(crate) fn remove_nosleep_tray(app: &AppHandle) {
+    app.remove_tray_by_id(NOSLEEP_TRAY_ID);
 }
 
 pub(crate) fn sync_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), String> {
@@ -189,7 +206,7 @@ pub(crate) fn create_tray(
                         eprintln!("failed to flush work stats before quit: {err}");
                     }
                 }
-                stop_sleep_guard();
+                stop_sleep_inhibitor();
                 app.exit(0);
             }
             _ => {}
@@ -205,11 +222,9 @@ pub(crate) fn create_tray(
             }
         })
         .build(app)?;
-    let _agent_tray = TrayIconBuilder::with_id(AGENT_TRAY_ID)
-        .icon(include_image!("./icons/agent-off.png"))
-        .icon_as_template(true)
-        .menu(&agent_tray_menu(app.handle(), &[])?)
-        .build(app)?;
+    if settings.nosleep_enabled {
+        create_nosleep_tray(app.handle())?;
+    }
     update_tray_title(app.handle(), today_work_seconds, settings);
 
     Ok(())

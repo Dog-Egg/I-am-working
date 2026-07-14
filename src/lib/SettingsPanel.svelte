@@ -12,40 +12,31 @@
     show_tray_time: true,
     tray_time_format: "HH:MM",
     launch_at_login: true,
+    nosleep_enabled: false,
   });
-  let settingsRequestId = 0;
-  let isCliInstalled = $state<boolean | null>(null);
-  let cliAction = $state<"install" | "uninstall" | null>(null);
-  let cliInstallMessage = $state("");
-  let cliInstallError = $state("");
+  let settingsAction = $state(false);
+  let nosleepError = $state("");
 
-  async function saveSettings(nextSettings: AppSettings) {
-    const requestId = ++settingsRequestId;
-    settings = nextSettings;
+  async function saveSettings(
+    nextSettings: AppSettings,
+    reportsNosleepError = false,
+  ) {
+    if (settingsAction) return;
+    settingsAction = true;
+    if (reportsNosleepError) nosleepError = "";
 
-    const result = await commands.updateSettings(nextSettings);
+    try {
+      const result = await commands.updateSettings(nextSettings);
 
-    if (result.status === "ok") {
-      if (requestId === settingsRequestId) {
+      if (result.status === "ok") {
         settings = result.data;
-      }
-    } else {
-      if (requestId === settingsRequestId) {
+      } else {
+        if (reportsNosleepError) nosleepError = result.error;
         settings = await commands.getSettings();
+        console.error("failed to update settings", result.error);
       }
-      console.error("failed to update settings", result.error);
-    }
-  }
-
-  async function refreshCliStatus() {
-    const result = await commands.isCliInstalled();
-
-    if (result.status === "ok") {
-      isCliInstalled = result.data;
-    } else {
-      isCliInstalled = null;
-      cliInstallError = result.error;
-      console.error("failed to check CLI installation status", result.error);
+    } finally {
+      settingsAction = false;
     }
   }
 
@@ -55,51 +46,20 @@
     void commands.getSettings().then((nextSettings) => {
       if (!disposed) settings = nextSettings;
     });
-    void refreshCliStatus();
-
     return () => {
       disposed = true;
     };
   });
 
-  async function installCli() {
-    cliAction = "install";
-    cliInstallMessage = "";
-    cliInstallError = "";
-
-    try {
-      const result = await commands.installCli();
-
-      if (result.status === "ok") {
-        isCliInstalled = true;
-        cliInstallMessage = `已安装到 ${result.data}`;
-      } else {
-        cliInstallError = result.error;
-        console.error("failed to install CLI", result.error);
-      }
-    } finally {
-      cliAction = null;
-    }
-  }
-
-  async function uninstallCli() {
-    cliAction = "uninstall";
-    cliInstallMessage = "";
-    cliInstallError = "";
-
-    try {
-      const result = await commands.uninstallCli();
-
-      if (result.status === "ok") {
-        isCliInstalled = false;
-        cliInstallMessage = `已卸载 ${result.data}`;
-      } else {
-        cliInstallError = result.error;
-        console.error("failed to uninstall CLI", result.error);
-      }
-    } finally {
-      cliAction = null;
-    }
+  async function setNosleepEnabled(enabled: boolean) {
+    if (enabled === settings.nosleep_enabled) return;
+    await saveSettings(
+      {
+        ...settings,
+        nosleep_enabled: enabled,
+      },
+      true,
+    );
   }
 </script>
 
@@ -116,6 +76,7 @@
           class="h-4 w-4 accent-cyan-400"
           type="checkbox"
           checked={settings.launch_at_login}
+          disabled={settingsAction}
           onchange={(event) =>
             void saveSettings({
               ...settings,
@@ -137,6 +98,7 @@
           class="h-4 w-4 accent-cyan-400"
           type="checkbox"
           checked={settings.show_tray_time}
+          disabled={settingsAction}
           onchange={(event) =>
             void saveSettings({
               ...settings,
@@ -157,7 +119,7 @@
               ? 'bg-cyan-500 text-zinc-950'
               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}"
             type="button"
-            disabled={!settings.show_tray_time}
+            disabled={settingsAction || !settings.show_tray_time}
             onclick={() =>
               void saveSettings({
                 ...settings,
@@ -175,40 +137,44 @@
     class="flex min-h-16 flex-wrap items-center justify-between gap-4 border-t border-zinc-800 py-3"
   >
     <div class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-zinc-300">命令行工具</span>
-      {#if cliInstallMessage}
-        <span class="text-xs text-emerald-300">{cliInstallMessage}</span>
-      {:else if cliInstallError}
-        <span class="text-xs text-red-300">{cliInstallError}</span>
-      {:else if isCliInstalled === true}
-        <span class="text-xs text-zinc-500">已安装 /usr/local/bin/iaw</span>
-      {:else if isCliInstalled === false}
-        <span class="text-xs text-zinc-500">未安装 /usr/local/bin/iaw</span>
-      {:else}
-        <span class="text-xs text-zinc-500">正在检查 /usr/local/bin/iaw</span>
+      <div class="flex items-center gap-1.5">
+        <span class="text-sm font-medium text-zinc-300">防止系统休眠</span>
+        <span class="group relative inline-flex">
+          <button
+            class="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-600 text-[10px] font-medium text-zinc-400 transition hover:border-zinc-400 hover:text-zinc-200 focus:border-cyan-400 focus:text-cyan-300 focus:outline-none"
+            type="button"
+            aria-label="防止系统休眠说明">?</button
+          >
+          <span
+            class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-72 -translate-x-1/2 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs leading-5 text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            role="tooltip"
+            >任务开始：<code>iaw nosleep on --name &lt;name&gt;</code><br />
+            任务结束：<code>iaw nosleep off --name &lt;name&gt;</code><br />
+            相同任务需使用相同的 name。</span
+          >
+        </span>
+      </div>
+      {#if nosleepError}
+        <span class="text-xs text-red-300">{nosleepError}</span>
       {/if}
     </div>
 
-    <div class="flex flex-wrap items-center gap-2">
-      {#if isCliInstalled}
+    <div
+      class="grid grid-cols-2 rounded-lg border border-zinc-700 bg-zinc-950 p-1"
+    >
+      {#each [true, false] as enabled}
         <button
-          class="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          class="rounded-md px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50
+          {settings.nosleep_enabled === enabled
+            ? 'bg-cyan-500 text-zinc-950'
+            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}"
           type="button"
-          disabled={cliAction !== null}
-          onclick={() => void uninstallCli()}
+          disabled={settingsAction}
+          onclick={() => void setNosleepEnabled(enabled)}
         >
-          {cliAction === "uninstall" ? "卸载中" : "卸载 CLI"}
+          {enabled ? "开启" : "关闭"}
         </button>
-      {:else}
-        <button
-          class="rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-medium text-zinc-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-          type="button"
-          disabled={isCliInstalled === null || cliAction !== null}
-          onclick={() => void installCli()}
-        >
-          {cliAction === "install" ? "安装中" : "安装 CLI"}
-        </button>
-      {/if}
+      {/each}
     </div>
   </div>
 </section>

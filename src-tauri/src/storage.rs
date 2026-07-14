@@ -82,6 +82,7 @@ pub(crate) fn default_settings() -> AppSettings {
         show_tray_time: true,
         tray_time_format: TrayTimeFormat::HhMm,
         launch_at_login: true,
+        nosleep_enabled: false,
     }
 }
 
@@ -223,7 +224,7 @@ mod tests {
 
         AppState {
             is_active: false,
-            active_agents: HashSet::new(),
+            active_guards: HashSet::new(),
             idle_started_at: None,
             pending_work_seconds_by_hour: HashMap::new(),
             last_flush_at: Instant::now(),
@@ -318,11 +319,28 @@ mod tests {
             show_tray_time: false,
             tray_time_format: TrayTimeFormat::HhMmSs,
             launch_at_login: true,
+            nosleep_enabled: true,
         };
 
         persist_settings(&path, &settings).unwrap();
 
         assert_eq!(load_settings(&path).unwrap(), settings);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_settings_defaults_nosleep_to_off() {
+        let path = std::env::temp_dir().join(format!(
+            "i-am-working-test-legacy-settings-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"show_tray_time":false,"tray_time_format":"HH:MM","launch_at_login":true}"#,
+        )
+        .unwrap();
+
+        assert!(!load_settings(&path).unwrap().nosleep_enabled);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -13,23 +13,23 @@ pub(crate) struct IpcInfo {
 }
 
 #[derive(Debug, serde::Serialize)]
-struct AgentStatusRequest {
-    agent_name: String,
+struct NosleepRequest {
+    name: String,
     active: bool,
 }
 
-pub fn set_agent_status(agent_name: &str, active: bool) -> Result<(), String> {
-    let agent_name = agent_name.trim();
-    if agent_name.is_empty() {
-        return Err("agent name cannot be empty".to_string());
+pub fn set_guard_status(name: &str, active: bool) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("name cannot be empty".to_string());
     }
 
-    let body = serde_json::to_string(&AgentStatusRequest {
-        agent_name: agent_name.to_string(),
+    let body = serde_json::to_string(&NosleepRequest {
+        name: name.to_string(),
         active,
     })
-    .map_err(|err| format!("failed to encode agent status request: {err}"))?;
-    let response = send_ipc_request("POST", "/agent", Some(&body))?;
+    .map_err(|err| format!("failed to encode nosleep request: {err}"))?;
+    let response = send_ipc_request("POST", "/nosleep", Some(&body))?;
     parse_empty_success_response(&response)
 }
 
@@ -68,17 +68,26 @@ pub fn run_from_env_args() -> Result<(), String> {
 
 pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     let args = args.into_iter().collect::<Vec<_>>();
-    if args.len() == 3 && args[0] == "agent" {
-        let active = match args[1].as_str() {
-            "start" | "begin" | "on" => true,
-            "stop" | "end" | "finish" | "off" => false,
-            _ => return Err(usage()),
-        };
-        set_agent_status(&args[2], active)?;
-        return Ok(());
+    let (name, active) = parse_nosleep_args(&args)?;
+    set_guard_status(name, active)
+}
+
+fn parse_nosleep_args(args: &[String]) -> Result<(&str, bool), String> {
+    if args.len() != 4 || args[0] != "nosleep" || args[2] != "--name" {
+        return Err(usage());
     }
 
-    Err(usage())
+    let active = match args[1].as_str() {
+        "on" => true,
+        "off" => false,
+        _ => return Err(usage()),
+    };
+    let name = args[3].trim();
+    if name.is_empty() {
+        return Err("name cannot be empty".to_string());
+    }
+
+    Ok((name, active))
 }
 
 pub(crate) fn ipc_info_path(app_data_dir: PathBuf) -> PathBuf {
@@ -135,7 +144,7 @@ fn parse_empty_success_response(response: &str) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: iaw agent start <name>\n       iaw agent stop <name>".to_string()
+    "usage: iaw nosleep on --name <name>\n       iaw nosleep off --name <name>".to_string()
 }
 
 #[cfg(test)]
@@ -143,8 +152,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_from_args_rejects_unknown_agent_action() {
-        assert!(run_from_args(["agent", "pause", "codex"].map(String::from)).is_err());
+    fn parse_nosleep_args_accepts_on_and_off() {
+        let on = ["nosleep", "on", "--name", "codex"].map(String::from);
+        let off = ["nosleep", "off", "--name", "claude"].map(String::from);
+
+        assert_eq!(parse_nosleep_args(&on), Ok(("codex", true)));
+        assert_eq!(parse_nosleep_args(&off), Ok(("claude", false)));
+    }
+
+    #[test]
+    fn parse_nosleep_args_requires_name_option() {
+        let missing = ["nosleep", "on"].map(String::from);
+        let positional = ["nosleep", "on", "codex"].map(String::from);
+        let empty = ["nosleep", "on", "--name", "  "].map(String::from);
+
+        assert!(parse_nosleep_args(&missing).is_err());
+        assert!(parse_nosleep_args(&positional).is_err());
+        assert_eq!(
+            parse_nosleep_args(&empty),
+            Err("name cannot be empty".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_nosleep_args_rejects_unrelated_command() {
+        let unrelated = ["worker", "start", "codex"].map(String::from);
+
+        assert!(parse_nosleep_args(&unrelated).is_err());
     }
 
     #[test]
