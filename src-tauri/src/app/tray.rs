@@ -78,7 +78,8 @@ pub(crate) fn create_tray(
             "quit" => {
                 let state = app.state::<Arc<Mutex<AppState>>>();
                 if let Ok(mut state) = state.lock() {
-                    if let Err(err) = flush_pending_work(&mut state) {
+                    let AppState { work_timer, db, .. } = &mut *state;
+                    if let Err(err) = flush_pending_work(work_timer, db) {
                         eprintln!("failed to flush work stats before quit: {err}");
                     }
                 }

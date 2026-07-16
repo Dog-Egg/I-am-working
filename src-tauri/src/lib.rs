@@ -1,14 +1,15 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use app::state::AppState;
 use app::tray::create_tray;
 use features::nosleep::commands::sync_nosleep_cli;
 use features::nosleep::ipc::spawn_cli_ipc_server;
+use features::nosleep::state::NoSleepState;
+use features::work_timer::state::WorkTimerState;
 use features::work_timer::storage::{init_app_data_dir, init_db, persisted_work_seconds_in_range};
 use features::work_timer::ticker::{spawn_ticker, today_range_unix};
 use settings::autostart::{refresh_launch_at_login, sync_launch_at_login};
+use settings::state::SettingsState;
 use settings::storage::{default_settings, load_settings};
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
@@ -88,16 +89,9 @@ pub fn run() {
                 refresh_launch_at_login(app.handle(), &mut settings);
             }
             let state = Arc::new(Mutex::new(AppState {
-                is_active: false,
-                active_guards: HashSet::new(),
-                idle_started_at: None,
-                pending_work_seconds_by_hour: HashMap::new(),
-                last_flush_at: Instant::now(),
-                today_start_unix: today_start,
-                today_end_unix: today_end,
-                today_work_seconds,
-                settings: settings.clone(),
-                settings_path,
+                work_timer: WorkTimerState::new(today_start, today_end, today_work_seconds),
+                nosleep: NoSleepState::default(),
+                settings: SettingsState::new(settings.clone(), settings_path),
                 db,
             }));
             app.manage(state.clone());

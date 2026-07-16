@@ -121,8 +121,8 @@ fn handle_connection(
             };
             let active_guards = {
                 let mut state = state.lock().unwrap();
-                let enabled = state.settings.nosleep_enabled;
-                match apply_guard_status(enabled, &mut state.active_guards, &nosleep) {
+                let enabled = state.settings.settings.nosleep_enabled;
+                match apply_guard_status(enabled, &mut state.nosleep.active_guards, &nosleep) {
                     Ok(active_guards) => active_guards,
                     Err(message) => {
                         write_response(&mut stream, "409 Conflict", "text/plain", message);

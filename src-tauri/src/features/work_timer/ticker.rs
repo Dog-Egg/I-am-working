@@ -7,6 +7,7 @@ use tauri_specta::Event as SpectaEvent;
 
 use crate::app::events::LogMessage;
 use crate::app::state::AppState;
+use crate::features::work_timer::state::WorkTimerState;
 use crate::features::work_timer::tray::update_tray_title;
 
 use super::models::{Stats, StatsUpdated};
@@ -50,7 +51,7 @@ pub(crate) fn today_range_unix() -> (i64, i64) {
     (start.timestamp(), end.timestamp())
 }
 
-pub(crate) fn build_stats(state: &AppState) -> Stats {
+pub(crate) fn build_stats(state: &WorkTimerState) -> Stats {
     Stats {
         today_work_seconds: state.today_work_seconds,
         is_active: state.is_active,
@@ -93,7 +94,7 @@ fn system_idle_seconds() -> f64 {
 // 并返回切换信息供调用方做副作用（日志/事件）。纯函数，不接触 AppHandle / 系统 API。
 //
 // 返回 (was_active, is_active)：调用方据此决定是否发送状态切换日志。
-pub(crate) fn apply_tick(state: &mut AppState, idle_secs: f64, now: i64) -> (bool, bool) {
+pub(crate) fn apply_tick(state: &mut WorkTimerState, idle_secs: f64, now: i64) -> (bool, bool) {
     let was_active = state.is_active;
     if idle_secs < IDLE_THRESHOLD_SECS as f64 {
         state.is_active = true;
@@ -121,24 +122,30 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
         let state = app.state::<Arc<Mutex<AppState>>>();
         let (stats, settings) = {
             let mut s = state.lock().unwrap();
+            let AppState {
+                work_timer,
+                settings,
+                db,
+                ..
+            } = &mut *s;
             let now = now_unix();
-            if now >= s.today_end_unix {
-                if let Err(err) = flush_pending_work(&mut s) {
+            if now >= work_timer.today_end_unix {
+                if let Err(err) = flush_pending_work(work_timer, db) {
                     eprintln!("failed to flush work stats before day rollover: {err}");
                 }
 
                 let (today_start, today_end) = today_range_unix();
-                s.today_start_unix = today_start;
-                s.today_end_unix = today_end;
-                s.today_work_seconds =
-                    persisted_work_seconds_in_range(&s.db, today_start, today_end).unwrap_or(0);
+                work_timer.today_start_unix = today_start;
+                work_timer.today_end_unix = today_end;
+                work_timer.today_work_seconds =
+                    persisted_work_seconds_in_range(db, today_start, today_end).unwrap_or(0);
             }
 
             // 系统级空闲检测：idle_secs 即用户未操作时长，直接与阈值比较判定活动/空闲
             let idle_secs = system_idle_seconds();
             push_log_message(&app, format!("system_idle_seconds() = {idle_secs:.3}s"));
 
-            let (was_active, is_active) = apply_tick(&mut s, idle_secs, now);
+            let (was_active, is_active) = apply_tick(work_timer, idle_secs, now);
 
             // 状态切换时发送日志到前端
             if was_active && !is_active {
@@ -147,13 +154,13 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
                 push_log_message(&app, "state: idle -> active".to_string());
             }
 
-            if s.last_flush_at.elapsed() >= Duration::from_secs(FLUSH_INTERVAL_SECS) {
-                if let Err(err) = flush_pending_work(&mut s) {
+            if work_timer.last_flush_at.elapsed() >= Duration::from_secs(FLUSH_INTERVAL_SECS) {
+                if let Err(err) = flush_pending_work(work_timer, db) {
                     eprintln!("failed to flush work stats: {err}");
                 }
             }
 
-            (build_stats(&s), s.settings.clone())
+            (build_stats(work_timer), settings.settings.clone())
         };
         update_tray_title(&app, stats.today_work_seconds, &settings);
         let _ = StatsUpdated(stats).emit(&app);
@@ -163,30 +170,17 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
-    use rusqlite::Connection;
-
-    use crate::settings::storage::default_settings;
-
-    use super::super::storage::{flush_pending_work, init_db_schema};
-
-    fn test_state() -> AppState {
-        let db = Connection::open_in_memory().unwrap();
-        init_db_schema(&db).unwrap();
-
-        AppState {
+    fn test_state() -> WorkTimerState {
+        WorkTimerState {
             is_active: false,
-            active_guards: HashSet::new(),
             idle_started_at: None,
             pending_work_seconds_by_hour: HashMap::new(),
             last_flush_at: Instant::now(),
             today_start_unix: 0,
             today_end_unix: 86_400,
             today_work_seconds: 0,
-            settings: default_settings(),
-            settings_path: std::env::temp_dir().join("i-am-working-test-settings.json"),
-            db,
         }
     }
 
@@ -204,7 +198,6 @@ mod tests {
         let mut state = test_state();
         state.today_work_seconds = 42;
         state.pending_work_seconds_by_hour.insert(3_600, 999);
-        flush_pending_work(&mut state).unwrap();
 
         let stats = build_stats(&state);
 
@@ -216,13 +209,13 @@ mod tests {
     // ---- apply_tick 状态机测试 ----
 
     // 辅助：构造一个处于"活动"或"空闲"初始状态的 state
-    fn test_state_active() -> AppState {
+    fn test_state_active() -> WorkTimerState {
         let mut s = test_state();
         s.is_active = true;
         s
     }
 
-    fn test_state_idle() -> AppState {
+    fn test_state_idle() -> WorkTimerState {
         let mut s = test_state();
         s.is_active = false;
         s.idle_started_at = Some(Instant::now());

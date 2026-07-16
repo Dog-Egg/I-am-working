@@ -12,7 +12,7 @@ use super::ticker::build_stats;
 #[tauri::command]
 pub(crate) fn get_stats(state: State<'_, Arc<Mutex<AppState>>>) -> Stats {
     let state = state.lock().unwrap();
-    build_stats(&state)
+    build_stats(&state.work_timer)
 }
 
 #[specta::specta]
@@ -23,5 +23,6 @@ pub(crate) fn get_work_records(
     end_unix: i64,
 ) -> Result<Vec<HourlyWorkRecord>, String> {
     let state = state.lock().unwrap();
-    work_records_in_range(&state, start_unix, end_unix).map_err(|error| error.to_string())
+    work_records_in_range(&state.work_timer, &state.db, start_unix, end_unix)
+        .map_err(|error| error.to_string())
 }

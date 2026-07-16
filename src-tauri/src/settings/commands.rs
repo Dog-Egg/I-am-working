@@ -16,7 +16,7 @@ use super::storage::persist_settings;
 #[tauri::command]
 pub(crate) fn get_settings(app: AppHandle, state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
     let state = state.lock().unwrap();
-    let mut settings = state.settings.clone();
+    let mut settings = state.settings.settings.clone();
     refresh_launch_at_login(&app, &mut settings);
     settings
 }
@@ -29,7 +29,7 @@ pub(crate) fn update_settings(
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
     let should_enable_nosleep = settings.nosleep_enabled;
-    let was_nosleep_enabled = state.lock().unwrap().settings.nosleep_enabled;
+    let was_nosleep_enabled = state.lock().unwrap().settings.settings.nosleep_enabled;
     if should_enable_nosleep != was_nosleep_enabled {
         if should_enable_nosleep {
             sync_nosleep_cli(&app, true)?;
@@ -45,12 +45,13 @@ pub(crate) fn update_settings(
     let settings_result = (|| {
         let mut state = state.lock().unwrap();
         sync_launch_at_login(&app, settings.launch_at_login)?;
-        persist_settings(&state.settings_path, &settings).map_err(|error| error.to_string())?;
-        state.settings = settings;
-        Ok::<_, String>((state.today_work_seconds, state.settings.clone()))
+        persist_settings(&state.settings.settings_path, &settings)
+            .map_err(|error| error.to_string())?;
+        state.settings.settings = settings;
+        Ok::<_, String>(state.settings.settings.clone())
     })();
 
-    let (today_work_seconds, next_settings) = match settings_result {
+    let next_settings = match settings_result {
         Ok(result) => result,
         Err(error) => {
             if should_enable_nosleep != was_nosleep_enabled {
@@ -66,10 +67,11 @@ pub(crate) fn update_settings(
         }
     };
 
+    let today_work_seconds = state.lock().unwrap().work_timer.today_work_seconds;
     update_tray_title(&app, today_work_seconds, &next_settings);
     if was_nosleep_enabled && !next_settings.nosleep_enabled {
         if let Ok(mut state) = state.lock() {
-            state.active_guards.clear();
+            state.nosleep.active_guards.clear();
         }
         stop_sleep_inhibitor();
         remove_nosleep_tray(&app);

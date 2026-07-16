@@ -4,8 +4,9 @@ use chrono::Local;
 use rusqlite::{params, Connection};
 use tauri::{App, Manager};
 
-use crate::app::state::AppState;
 use crate::features::work_timer::models::HourlyWorkRecord;
+
+use super::state::WorkTimerState;
 
 const CREATE_HOURLY_WORK_STATS_SQL: &str = "CREATE TABLE IF NOT EXISTS hourly_work_stats (
     hour_start_unix INTEGER PRIMARY KEY,
@@ -77,14 +78,17 @@ pub(crate) fn init_db_schema(db: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub(crate) fn flush_pending_work(state: &mut AppState) -> rusqlite::Result<()> {
+pub(crate) fn flush_pending_work(
+    state: &mut WorkTimerState,
+    db: &mut Connection,
+) -> rusqlite::Result<()> {
     if state.pending_work_seconds_by_hour.is_empty() {
         state.last_flush_at = std::time::Instant::now();
         return Ok(());
     }
 
     let pending = state.pending_work_seconds_by_hour.clone();
-    let tx = state.db.transaction()?;
+    let tx = db.transaction()?;
     {
         let mut stmt = tx.prepare(UPSERT_HOURLY_WORK_SQL)?;
 
@@ -125,7 +129,8 @@ pub(crate) fn persisted_work_seconds_in_range(
 }
 
 pub(crate) fn work_records_in_range(
-    state: &AppState,
+    state: &WorkTimerState,
+    db: &Connection,
     start_unix: i64,
     end_unix: i64,
 ) -> rusqlite::Result<Vec<HourlyWorkRecord>> {
@@ -135,7 +140,7 @@ pub(crate) fn work_records_in_range(
             "?1" => start_unix,
             "?2" => end_unix,
         );
-        let mut stmt = state.db.prepare(SELECT_WORK_RECORDS_SQL)?;
+        let mut stmt = db.prepare(SELECT_WORK_RECORDS_SQL)?;
 
         let rows = stmt.query_map(params![start_unix, end_unix], |row| {
             Ok(HourlyWorkRecord {
@@ -173,83 +178,75 @@ pub(crate) fn work_records_in_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::storage::default_settings;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::time::Instant;
 
-    fn test_state() -> AppState {
+    fn test_state() -> (WorkTimerState, Connection) {
         let db = Connection::open_in_memory().unwrap();
         init_db_schema(&db).unwrap();
 
-        AppState {
-            is_active: false,
-            active_guards: HashSet::new(),
-            idle_started_at: None,
-            pending_work_seconds_by_hour: HashMap::new(),
-            last_flush_at: Instant::now(),
-            today_start_unix: 0,
-            today_end_unix: 86_400,
-            today_work_seconds: 0,
-            settings: default_settings(),
-            settings_path: std::env::temp_dir().join("i-am-working-test-settings.json"),
+        (
+            WorkTimerState {
+                is_active: false,
+                idle_started_at: None,
+                pending_work_seconds_by_hour: HashMap::new(),
+                last_flush_at: Instant::now(),
+                today_start_unix: 0,
+                today_end_unix: 86_400,
+                today_work_seconds: 0,
+            },
             db,
-        }
+        )
     }
 
     #[test]
     fn flush_pending_work_inserts_and_accumulates_hourly_rows() {
-        let mut state = test_state();
+        let (mut state, mut db) = test_state();
 
         state.pending_work_seconds_by_hour.insert(3_600, 10);
-        flush_pending_work(&mut state).unwrap();
+        flush_pending_work(&mut state, &mut db).unwrap();
 
         assert!(state.pending_work_seconds_by_hour.is_empty());
-        assert_eq!(
-            persisted_work_seconds_in_range(&state.db, 0, 7_200).unwrap(),
-            10
-        );
+        assert_eq!(persisted_work_seconds_in_range(&db, 0, 7_200).unwrap(), 10);
 
         state.pending_work_seconds_by_hour.insert(3_600, 5);
         state.pending_work_seconds_by_hour.insert(7_200, 7);
-        flush_pending_work(&mut state).unwrap();
+        flush_pending_work(&mut state, &mut db).unwrap();
 
+        assert_eq!(persisted_work_seconds_in_range(&db, 0, 10_800).unwrap(), 22);
         assert_eq!(
-            persisted_work_seconds_in_range(&state.db, 0, 10_800).unwrap(),
-            22
-        );
-        assert_eq!(
-            persisted_work_seconds_in_range(&state.db, 3_600, 7_200).unwrap(),
+            persisted_work_seconds_in_range(&db, 3_600, 7_200).unwrap(),
             15
         );
     }
 
     #[test]
     fn persisted_work_seconds_in_range_uses_start_inclusive_end_exclusive() {
-        let mut state = test_state();
+        let (mut state, mut db) = test_state();
         state.pending_work_seconds_by_hour.insert(0, 3);
         state.pending_work_seconds_by_hour.insert(3_600, 5);
         state.pending_work_seconds_by_hour.insert(7_200, 7);
-        flush_pending_work(&mut state).unwrap();
+        flush_pending_work(&mut state, &mut db).unwrap();
 
         assert_eq!(
-            persisted_work_seconds_in_range(&state.db, 3_600, 7_200).unwrap(),
+            persisted_work_seconds_in_range(&db, 3_600, 7_200).unwrap(),
             5
         );
     }
 
     #[test]
     fn work_records_in_range_merges_persisted_and_pending_records() {
-        let mut state = test_state();
+        let (mut state, mut db) = test_state();
         state.pending_work_seconds_by_hour.insert(3_600, 100);
         state.pending_work_seconds_by_hour.insert(7_200, 50);
-        flush_pending_work(&mut state).unwrap();
+        flush_pending_work(&mut state, &mut db).unwrap();
 
         state.pending_work_seconds_by_hour.insert(3_600, 7);
         state.pending_work_seconds_by_hour.insert(10_800, 11);
         state.pending_work_seconds_by_hour.insert(14_400, 13);
 
         assert_eq!(
-            work_records_in_range(&state, 0, 14_400).unwrap(),
+            work_records_in_range(&state, &db, 0, 14_400).unwrap(),
             vec![
                 HourlyWorkRecord {
                     hour_start_unix: 3_600,
