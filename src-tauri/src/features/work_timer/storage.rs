@@ -4,8 +4,8 @@ use chrono::Local;
 use rusqlite::{params, Connection};
 use tauri::{App, Manager};
 
-use crate::app_state::AppState;
-use crate::models::{AppSettings, HourlyWorkRecord, TrayTimeFormat};
+use crate::app::state::AppState;
+use crate::features::work_timer::models::HourlyWorkRecord;
 
 const CREATE_HOURLY_WORK_STATS_SQL: &str = "CREATE TABLE IF NOT EXISTS hourly_work_stats (
     hour_start_unix INTEGER PRIMARY KEY,
@@ -73,48 +73,6 @@ pub(crate) fn init_db(app_data_dir: &Path) -> Result<Connection, Box<dyn std::er
 pub(crate) fn init_db_schema(db: &Connection) -> rusqlite::Result<()> {
     log_sql!(CREATE_HOURLY_WORK_STATS_SQL);
     db.execute(CREATE_HOURLY_WORK_STATS_SQL, [])?;
-
-    Ok(())
-}
-
-pub(crate) fn default_settings() -> AppSettings {
-    AppSettings {
-        show_tray_time: true,
-        tray_time_format: TrayTimeFormat::HhMm,
-        launch_at_login: true,
-        nosleep_enabled: false,
-    }
-}
-
-#[cfg(debug_assertions)]
-fn log_settings_file(action: &str, path: &Path) {
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
-    eprintln!("[settings {timestamp}] {action} path={}", path.display());
-}
-
-#[cfg(not(debug_assertions))]
-fn log_settings_file(_action: &str, _path: &Path) {}
-
-pub(crate) fn load_settings(path: &Path) -> Result<AppSettings, Box<dyn std::error::Error>> {
-    if !path.exists() {
-        return Ok(default_settings());
-    }
-
-    log_settings_file("read", path);
-    let contents = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&contents)?)
-}
-
-pub(crate) fn persist_settings(
-    path: &Path,
-    settings: &AppSettings,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    log_settings_file("write", path);
-    std::fs::write(path, serde_json::to_vec_pretty(settings)?)?;
 
     Ok(())
 }
@@ -215,6 +173,7 @@ pub(crate) fn work_records_in_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::storage::default_settings;
     use std::collections::{HashMap, HashSet};
     use std::time::Instant;
 
@@ -306,41 +265,5 @@ mod tests {
                 },
             ]
         );
-    }
-
-    #[test]
-    fn load_settings_uses_json_file_values() {
-        let path = std::env::temp_dir().join(format!(
-            "i-am-working-test-settings-{}.json",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        let settings = AppSettings {
-            show_tray_time: false,
-            tray_time_format: TrayTimeFormat::HhMmSs,
-            launch_at_login: true,
-            nosleep_enabled: true,
-        };
-
-        persist_settings(&path, &settings).unwrap();
-
-        assert_eq!(load_settings(&path).unwrap(), settings);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn load_settings_defaults_nosleep_to_off() {
-        let path = std::env::temp_dir().join(format!(
-            "i-am-working-test-legacy-settings-{}.json",
-            std::process::id()
-        ));
-        std::fs::write(
-            &path,
-            r#"{"show_tray_time":false,"tray_time_format":"HH:MM","launch_at_login":true}"#,
-        )
-        .unwrap();
-
-        assert!(!load_settings(&path).unwrap().nosleep_enabled);
-        let _ = std::fs::remove_file(path);
     }
 }

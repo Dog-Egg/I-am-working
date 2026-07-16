@@ -1,3 +1,5 @@
+//! Platform sleep-inhibition support for the nosleep feature.
+
 use std::sync::{Mutex, OnceLock};
 
 static SLEEP_INHIBITOR: OnceLock<Mutex<Option<SleepInhibitor>>> = OnceLock::new();

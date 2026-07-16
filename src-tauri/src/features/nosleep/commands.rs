@@ -1,14 +1,6 @@
-use std::sync::{Arc, Mutex};
+//! CLI installation support for the nosleep feature.
 
-use tauri::{AppHandle, State};
-
-use crate::app_state::{build_stats, AppState};
-use crate::desktop::{
-    create_nosleep_tray, refresh_launch_at_login, remove_nosleep_tray, sync_launch_at_login,
-    update_tray_title,
-};
-use crate::models::{AppSettings, HourlyWorkRecord, Stats};
-use crate::storage::{persist_settings, work_records_in_range};
+use tauri::AppHandle;
 
 const CLI_INSTALL_PATH: &str = "/usr/local/bin/iaw";
 
@@ -19,90 +11,6 @@ pub(crate) fn sync_nosleep_cli(app: &AppHandle, enabled: bool) -> Result<(), Str
         uninstall_cli_inner()?;
     }
     Ok(())
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn get_stats(state: State<'_, Arc<Mutex<AppState>>>) -> Stats {
-    let s = state.lock().unwrap();
-    build_stats(&s)
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn get_work_records(
-    state: State<'_, Arc<Mutex<AppState>>>,
-    start_unix: i64,
-    end_unix: i64,
-) -> Result<Vec<HourlyWorkRecord>, String> {
-    let s = state.lock().unwrap();
-    work_records_in_range(&s, start_unix, end_unix).map_err(|e| e.to_string())
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn get_settings(app: AppHandle, state: State<'_, Arc<Mutex<AppState>>>) -> AppSettings {
-    let s = state.lock().unwrap();
-    let mut settings = s.settings.clone();
-    refresh_launch_at_login(&app, &mut settings);
-    settings
-}
-
-#[specta::specta]
-#[tauri::command]
-pub(crate) fn update_settings(
-    app: AppHandle,
-    state: State<'_, Arc<Mutex<AppState>>>,
-    settings: AppSettings,
-) -> Result<AppSettings, String> {
-    let should_enable_nosleep = settings.nosleep_enabled;
-    let was_nosleep_enabled = state.lock().unwrap().settings.nosleep_enabled;
-    if should_enable_nosleep != was_nosleep_enabled {
-        if should_enable_nosleep {
-            sync_nosleep_cli(&app, true)?;
-            if let Err(err) = create_nosleep_tray(&app) {
-                let _ = uninstall_cli_inner();
-                return Err(err.to_string());
-            }
-        } else {
-            sync_nosleep_cli(&app, false)?;
-        }
-    }
-
-    let settings_result = (|| {
-        let mut s = state.lock().unwrap();
-        sync_launch_at_login(&app, settings.launch_at_login)?;
-        persist_settings(&s.settings_path, &settings).map_err(|e| e.to_string())?;
-        s.settings = settings;
-        Ok::<_, String>((s.today_work_seconds, s.settings.clone()))
-    })();
-
-    let (today_work_seconds, next_settings) = match settings_result {
-        Ok(result) => result,
-        Err(err) => {
-            if should_enable_nosleep != was_nosleep_enabled {
-                if should_enable_nosleep {
-                    remove_nosleep_tray(&app);
-                    let _ = sync_nosleep_cli(&app, false);
-                } else {
-                    let _ = sync_nosleep_cli(&app, true);
-                    let _ = create_nosleep_tray(&app);
-                }
-            }
-            return Err(err);
-        }
-    };
-
-    update_tray_title(&app, today_work_seconds, &next_settings);
-    if was_nosleep_enabled && !next_settings.nosleep_enabled {
-        if let Ok(mut state) = state.lock() {
-            state.active_guards.clear();
-        }
-        crate::nosleep::stop_sleep_inhibitor();
-        remove_nosleep_tray(&app);
-    }
-
-    Ok(next_settings)
 }
 
 #[cfg(target_os = "macos")]

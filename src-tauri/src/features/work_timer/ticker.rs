@@ -1,31 +1,16 @@
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Local, TimeZone};
-use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event as SpectaEvent;
 
-use crate::desktop::update_tray_title;
-use crate::models::{AppSettings, LogMessage, Stats, StatsUpdated};
-use crate::storage::{flush_pending_work, persisted_work_seconds_in_range};
+use crate::app::events::LogMessage;
+use crate::app::state::AppState;
+use crate::features::work_timer::tray::update_tray_title;
 
-pub(crate) struct AppState {
-    pub(crate) is_active: bool,
-    pub(crate) active_guards: HashSet<String>,
-    // 进入空闲状态的瞬间；处于工作状态时为 None
-    pub(crate) idle_started_at: Option<Instant>,
-    pub(crate) pending_work_seconds_by_hour: HashMap<i64, u64>,
-    pub(crate) last_flush_at: Instant,
-    pub(crate) today_start_unix: i64,
-    pub(crate) today_end_unix: i64,
-    pub(crate) today_work_seconds: u64,
-    pub(crate) settings: AppSettings,
-    pub(crate) settings_path: PathBuf,
-    pub(crate) db: Connection,
-}
+use super::models::{Stats, StatsUpdated};
+use super::storage::{flush_pending_work, persisted_work_seconds_in_range};
 
 const IDLE_THRESHOLD_SECS: u64 = 60;
 const FLUSH_INTERVAL_SECS: u64 = 60;
@@ -157,9 +142,9 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
 
             // 状态切换时发送日志到前端
             if was_active && !is_active {
-                push_log_message(&app, format!("state: active -> idle"));
+                push_log_message(&app, "state: active -> idle".to_string());
             } else if !was_active && is_active {
-                push_log_message(&app, format!("state: idle -> active"));
+                push_log_message(&app, "state: idle -> active".to_string());
             }
 
             if s.last_flush_at.elapsed() >= Duration::from_secs(FLUSH_INTERVAL_SECS) {
@@ -178,7 +163,13 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{default_settings, flush_pending_work, init_db_schema};
+    use std::collections::{HashMap, HashSet};
+
+    use rusqlite::Connection;
+
+    use crate::settings::storage::default_settings;
+
+    use super::super::storage::{flush_pending_work, init_db_schema};
 
     fn test_state() -> AppState {
         let db = Connection::open_in_memory().unwrap();

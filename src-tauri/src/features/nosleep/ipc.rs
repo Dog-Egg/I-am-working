@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::app_state::AppState;
-use crate::cli::{ipc_info_path, IpcInfo};
-use crate::desktop::update_nosleep_tray;
-use crate::nosleep::sync_sleep_inhibitor;
+use crate::app::state::AppState;
+use crate::features::nosleep::cli::{ipc_info_path, IpcInfo};
+use crate::features::nosleep::inhibitor::sync_sleep_inhibitor;
+use crate::features::nosleep::tray::update_nosleep_tray;
 use tauri::AppHandle;
 
 #[derive(Debug, serde::Deserialize)]
