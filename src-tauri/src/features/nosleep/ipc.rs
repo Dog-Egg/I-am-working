@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -8,6 +7,7 @@ use std::time::Duration;
 use crate::app::state::AppState;
 use crate::features::nosleep::cli::{ipc_info_path, IpcInfo};
 use crate::features::nosleep::inhibitor::sync_sleep_inhibitor;
+use crate::features::nosleep::state::{adjust_guard_count, sorted_active_guards, ActiveGuards};
 use crate::features::nosleep::tray::update_nosleep_tray;
 use tauri::AppHandle;
 
@@ -19,21 +19,15 @@ struct NosleepRequest {
 
 fn apply_guard_status(
     enabled: bool,
-    active_guards: &mut HashSet<String>,
+    active_guards: &mut ActiveGuards,
     request: &NosleepRequest,
-) -> Result<Vec<String>, &'static str> {
+) -> Result<Vec<(String, u32)>, &'static str> {
     if !enabled {
         return Err("nosleep is disabled in settings\n");
     }
 
-    if request.active {
-        active_guards.insert(request.name.trim().to_string());
-    } else {
-        active_guards.remove(request.name.trim());
-    }
-    let mut active_guards = active_guards.iter().cloned().collect::<Vec<_>>();
-    active_guards.sort();
-    Ok(active_guards)
+    adjust_guard_count(active_guards, &request.name, request.active);
+    Ok(sorted_active_guards(active_guards))
 }
 
 pub(crate) fn spawn_cli_ipc_server(
@@ -107,8 +101,8 @@ fn handle_connection(
                 );
                 return;
             };
-            let nosleep = match serde_json::from_str::<NosleepRequest>(body.trim()) {
-                Ok(nosleep) if !nosleep.name.trim().is_empty() => nosleep,
+            let request = match serde_json::from_str::<NosleepRequest>(body.trim()) {
+                Ok(request) if !request.name.trim().is_empty() => request,
                 _ => {
                     write_response(
                         &mut stream,
@@ -122,7 +116,7 @@ fn handle_connection(
             let active_guards = {
                 let mut state = state.lock().unwrap();
                 let enabled = state.settings.settings.nosleep_enabled;
-                match apply_guard_status(enabled, &mut state.nosleep.active_guards, &nosleep) {
+                match apply_guard_status(enabled, &mut state.nosleep.active_guards, &request) {
                     Ok(active_guards) => active_guards,
                     Err(message) => {
                         write_response(&mut stream, "409 Conflict", "text/plain", message);
@@ -209,7 +203,7 @@ mod tests {
 
     #[test]
     fn guard_status_is_rejected_when_nosleep_is_disabled() {
-        let mut active_guards = HashSet::new();
+        let mut active_guards = ActiveGuards::new();
         let request = NosleepRequest {
             name: "codex".to_string(),
             active: true,
@@ -221,7 +215,7 @@ mod tests {
 
     #[test]
     fn guard_status_updates_and_sorts_active_names() {
-        let mut active_guards = HashSet::from(["zed".to_string()]);
+        let mut active_guards = ActiveGuards::from([("zed".to_string(), 1)]);
         let request = NosleepRequest {
             name: " codex ".to_string(),
             active: true,
@@ -229,7 +223,34 @@ mod tests {
 
         assert_eq!(
             apply_guard_status(true, &mut active_guards, &request).unwrap(),
-            vec!["codex".to_string(), "zed".to_string()]
+            vec![("codex".to_string(), 1), ("zed".to_string(), 1)]
         );
+    }
+
+    #[test]
+    fn guard_status_counts_repeated_on_and_off_requests() {
+        let mut active_guards = ActiveGuards::new();
+        let mut request = NosleepRequest {
+            name: "codex".to_string(),
+            active: true,
+        };
+
+        apply_guard_status(true, &mut active_guards, &request).unwrap();
+        assert_eq!(
+            apply_guard_status(true, &mut active_guards, &request).unwrap(),
+            vec![("codex".to_string(), 2)]
+        );
+
+        request.active = false;
+        assert_eq!(
+            apply_guard_status(true, &mut active_guards, &request).unwrap(),
+            vec![("codex".to_string(), 1)]
+        );
+        assert!(apply_guard_status(true, &mut active_guards, &request)
+            .unwrap()
+            .is_empty());
+        assert!(apply_guard_status(true, &mut active_guards, &request)
+            .unwrap()
+            .is_empty());
     }
 }

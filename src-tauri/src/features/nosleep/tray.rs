@@ -1,13 +1,19 @@
+use std::sync::{Arc, Mutex};
+
 use tauri::{
     include_image,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
-    AppHandle,
+    AppHandle, Manager,
 };
+
+use crate::app::state::AppState;
+use crate::features::nosleep::inhibitor::sync_sleep_inhibitor;
+use crate::features::nosleep::state::{adjust_guard_count, sorted_active_guards};
 
 const TRAY_ID: &str = "nosleep-status";
 
-fn tray_menu(app: &AppHandle, active_guards: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
+fn tray_menu(app: &AppHandle, active_guards: &[(String, u32)]) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
 
     if active_guards.is_empty() {
@@ -22,15 +28,29 @@ fn tray_menu(app: &AppHandle, active_guards: &[String]) -> tauri::Result<Menu<ta
     menu.append(&title_item)?;
     menu.append(&separator)?;
 
-    for (index, guard) in active_guards.iter().enumerate() {
-        let item = MenuItem::with_id(
+    for (index, (guard, count)) in active_guards.iter().enumerate() {
+        let increment = MenuItem::with_id(
             app,
-            format!("guard-active-{index}"),
-            guard,
-            false,
+            format!("guard-increment-{guard}"),
+            "+1",
+            true,
             None::<&str>,
         )?;
-        menu.append(&item)?;
+        let decrement = MenuItem::with_id(
+            app,
+            format!("guard-decrement-{guard}"),
+            "-1",
+            true,
+            None::<&str>,
+        )?;
+        let submenu = Submenu::with_id_and_items(
+            app,
+            format!("guard-active-{index}"),
+            format!("{guard}  +{count}"),
+            true,
+            &[&increment, &decrement],
+        )?;
+        menu.append(&submenu)?;
     }
 
     Ok(menu)
@@ -50,7 +70,34 @@ fn update_icon(app: &AppHandle, has_active_guards: bool) {
     }
 }
 
-pub(crate) fn update_nosleep_tray(app: &AppHandle, active_guards: &[String]) {
+fn handle_guard_menu_event(app: &AppHandle, event_id: &str) {
+    let (name, active) = if let Some(name) = event_id.strip_prefix("guard-increment-") {
+        (name, true)
+    } else if let Some(name) = event_id.strip_prefix("guard-decrement-") {
+        (name, false)
+    } else {
+        return;
+    };
+
+    let active_guards = {
+        let state = app.state::<Arc<Mutex<AppState>>>();
+        let Ok(mut state) = state.lock() else {
+            eprintln!("failed to lock app state for nosleep tray action");
+            return;
+        };
+        if !state.settings.settings.nosleep_enabled {
+            return;
+        }
+
+        adjust_guard_count(&mut state.nosleep.active_guards, name, active);
+        sorted_active_guards(&state.nosleep.active_guards)
+    };
+
+    update_nosleep_tray(app, &active_guards);
+    sync_sleep_inhibitor(!active_guards.is_empty());
+}
+
+pub(crate) fn update_nosleep_tray(app: &AppHandle, active_guards: &[(String, u32)]) {
     update_icon(app, !active_guards.is_empty());
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
@@ -76,6 +123,7 @@ pub(crate) fn create_nosleep_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(include_image!("./icons/nosleep-off.png"))
         .icon_as_template(true)
         .menu(&tray_menu(app, &[])?)
+        .on_menu_event(|app, event| handle_guard_menu_event(app, event.id.as_ref()))
         .build(app)?;
     Ok(())
 }
