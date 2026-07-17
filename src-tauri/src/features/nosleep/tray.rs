@@ -29,13 +29,6 @@ fn tray_menu(app: &AppHandle, active_guards: &[(String, u32)]) -> tauri::Result<
     menu.append(&separator)?;
 
     for (index, (guard, count)) in active_guards.iter().enumerate() {
-        let increment = MenuItem::with_id(
-            app,
-            format!("guard-increment-{guard}"),
-            "+1",
-            true,
-            None::<&str>,
-        )?;
         let decrement = MenuItem::with_id(
             app,
             format!("guard-decrement-{guard}"),
@@ -48,7 +41,7 @@ fn tray_menu(app: &AppHandle, active_guards: &[(String, u32)]) -> tauri::Result<
             format!("guard-active-{index}"),
             format!("{guard}  +{count}"),
             true,
-            &[&increment, &decrement],
+            &[&decrement],
         )?;
         menu.append(&submenu)?;
     }
@@ -71,11 +64,7 @@ fn update_icon(app: &AppHandle, has_active_guards: bool) {
 }
 
 fn handle_guard_menu_event(app: &AppHandle, event_id: &str) {
-    let (name, active) = if let Some(name) = event_id.strip_prefix("guard-increment-") {
-        (name, true)
-    } else if let Some(name) = event_id.strip_prefix("guard-decrement-") {
-        (name, false)
-    } else {
+    let Some(name) = event_id.strip_prefix("guard-decrement-") else {
         return;
     };
 
@@ -89,7 +78,7 @@ fn handle_guard_menu_event(app: &AppHandle, event_id: &str) {
             return;
         }
 
-        adjust_guard_count(&mut state.nosleep.active_guards, name, active);
+        adjust_guard_count(&mut state.nosleep.active_guards, name, false);
         sorted_active_guards(&state.nosleep.active_guards)
     };
 
