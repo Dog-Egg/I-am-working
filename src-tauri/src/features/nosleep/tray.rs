@@ -8,8 +8,7 @@ use tauri::{
 };
 
 use crate::app::state::AppState;
-use crate::features::nosleep::inhibitor::sync_sleep_inhibitor;
-use crate::features::nosleep::state::{adjust_guard_count, sorted_active_guards};
+use crate::features::nosleep::operation::{update_guard, GuardUpdateError};
 
 const TRAY_ID: &str = "nosleep-status";
 
@@ -68,22 +67,13 @@ fn handle_guard_menu_event(app: &AppHandle, event_id: &str) {
         return;
     };
 
-    let active_guards = {
-        let state = app.state::<Arc<Mutex<AppState>>>();
-        let Ok(mut state) = state.lock() else {
+    let state = app.state::<Arc<Mutex<AppState>>>();
+    match update_guard(app, state.inner(), name, false) {
+        Ok(()) | Err(GuardUpdateError::Disabled) => {}
+        Err(GuardUpdateError::StateUnavailable) => {
             eprintln!("failed to lock app state for nosleep tray action");
-            return;
-        };
-        if !state.settings.settings.nosleep_enabled {
-            return;
         }
-
-        adjust_guard_count(&mut state.nosleep.active_guards, name, false);
-        sorted_active_guards(&state.nosleep.active_guards)
-    };
-
-    update_nosleep_tray(app, &active_guards);
-    sync_sleep_inhibitor(!active_guards.is_empty());
+    }
 }
 
 pub(crate) fn update_nosleep_tray(app: &AppHandle, active_guards: &[(String, u32)]) {

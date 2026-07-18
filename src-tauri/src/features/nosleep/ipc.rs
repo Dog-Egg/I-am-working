@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use crate::app::state::AppState;
 use crate::features::nosleep::cli::{ipc_info_path, IpcInfo};
-use crate::features::nosleep::inhibitor::sync_sleep_inhibitor;
+use crate::features::nosleep::operation::{update_guard, GuardUpdateError};
+#[cfg(test)]
 use crate::features::nosleep::state::{adjust_guard_count, sorted_active_guards, ActiveGuards};
-use crate::features::nosleep::tray::update_nosleep_tray;
 use tauri::AppHandle;
 
 #[derive(Debug, serde::Deserialize)]
@@ -17,6 +17,7 @@ struct NosleepRequest {
     active: bool,
 }
 
+#[cfg(test)]
 fn apply_guard_status(
     enabled: bool,
     active_guards: &mut ActiveGuards,
@@ -113,20 +114,28 @@ fn handle_connection(
                     return;
                 }
             };
-            let active_guards = {
-                let mut state = state.lock().unwrap();
-                let enabled = state.settings.settings.nosleep_enabled;
-                match apply_guard_status(enabled, &mut state.nosleep.active_guards, &request) {
-                    Ok(active_guards) => active_guards,
-                    Err(message) => {
-                        write_response(&mut stream, "409 Conflict", "text/plain", message);
-                        return;
-                    }
+            match update_guard(app, state, &request.name, request.active) {
+                Ok(()) => {}
+                Err(GuardUpdateError::Disabled) => {
+                    write_response(
+                        &mut stream,
+                        "409 Conflict",
+                        "text/plain",
+                        "nosleep is disabled in settings\n",
+                    );
+                    return;
                 }
-            };
-
-            update_nosleep_tray(app, &active_guards);
-            sync_sleep_inhibitor(!active_guards.is_empty());
+                Err(GuardUpdateError::StateUnavailable) => {
+                    eprintln!("failed to lock app state for nosleep CLI action");
+                    write_response(
+                        &mut stream,
+                        "500 Internal Server Error",
+                        "text/plain",
+                        "app state is unavailable\n",
+                    );
+                    return;
+                }
+            }
             write_response(&mut stream, "200 OK", "application/json", "{}\n");
         }
         _ => {
