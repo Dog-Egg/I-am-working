@@ -6,7 +6,13 @@
   } from "$lib/bindings";
   import { onMount } from "svelte";
 
-  const trayTimeFormatOptions: TrayTimeFormat[] = ["HH:MM", "HH:MM:SS"];
+  const trayTimeFormatOptions: Array<{
+    value: TrayTimeFormat;
+    label: string;
+  }> = [
+    { value: "HH:MM", label: "1时23分" },
+    { value: "HH:MM:SS", label: "1时23分45秒" },
+  ];
 
   let settings = $state<AppSettings>({
     show_tray_time: true,
@@ -115,7 +121,7 @@
         {#each trayTimeFormatOptions as option}
           <button
             class="rounded-md px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40
-            {settings.tray_time_format === option
+            {settings.tray_time_format === option.value
               ? 'bg-cyan-500 text-zinc-950'
               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}"
             type="button"
@@ -123,10 +129,10 @@
             onclick={() =>
               void saveSettings({
                 ...settings,
-                tray_time_format: option,
+                tray_time_format: option.value,
               })}
           >
-            {option}
+            {option.label}
           </button>
         {/each}
       </div>

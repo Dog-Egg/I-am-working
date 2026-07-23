@@ -41,17 +41,20 @@
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
     const s = total % 60;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+
+    if (h > 0) return `${h}时${m}分${s}秒`;
+    if (m > 0) return `${m}分${s}秒`;
+    return `${s}秒`;
   }
 
   function formatDurationMinutes(total: number): string {
-    if (total > 0 && total < 60) return "<00:01";
+    if (total > 0 && total < 60) return "<1分";
 
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(h)}:${pad(m)}`;
+
+    if (h > 0) return m > 0 ? `${h}时${m}分` : `${h}时`;
+    return `${m}分`;
   }
 
   function startOfDay(date: Date): Date {
@@ -458,7 +461,7 @@
           onclick={() => drillDown(item)}
         >
           <div
-            class="z-10 pointer-events-none absolute bottom-full mb-2 rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
+            class="pointer-events-none absolute bottom-full z-10 mb-2 whitespace-nowrap rounded bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-none text-zinc-100 opacity-0 shadow-lg shadow-black/30 transition-opacity group-hover:opacity-100"
           >
             {formatDurationMinutes(item.seconds)}
           </div>
