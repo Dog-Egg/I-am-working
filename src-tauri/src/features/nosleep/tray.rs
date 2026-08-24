@@ -8,7 +8,7 @@ use tauri::{
 };
 
 use crate::app::state::AppState;
-use crate::features::nosleep::operation::{update_guard, GuardUpdateError};
+use crate::features::nosleep::operation::{clear_guard, GuardUpdateError};
 
 const TRAY_ID: &str = "nosleep-status";
 
@@ -28,19 +28,19 @@ fn tray_menu(app: &AppHandle, active_guards: &[(String, u32)]) -> tauri::Result<
     menu.append(&separator)?;
 
     for (index, (guard, count)) in active_guards.iter().enumerate() {
-        let decrement = MenuItem::with_id(
+        let clear = MenuItem::with_id(
             app,
-            format!("guard-decrement-{guard}"),
-            "-1",
+            format!("guard-clear-{guard}"),
+            "清除",
             true,
             None::<&str>,
         )?;
         let submenu = Submenu::with_id_and_items(
             app,
             format!("guard-active-{index}"),
-            format!("{guard}  +{count}"),
+            format!("{guard}  x{count}"),
             true,
-            &[&decrement],
+            &[&clear],
         )?;
         menu.append(&submenu)?;
     }
@@ -63,12 +63,12 @@ fn update_icon(app: &AppHandle, has_active_guards: bool) {
 }
 
 fn handle_guard_menu_event(app: &AppHandle, event_id: &str) {
-    let Some(name) = event_id.strip_prefix("guard-decrement-") else {
+    let Some(name) = event_id.strip_prefix("guard-clear-") else {
         return;
     };
 
     let state = app.state::<Arc<Mutex<AppState>>>();
-    match update_guard(app, state.inner(), name, false) {
+    match clear_guard(app, state.inner(), name) {
         Ok(()) | Err(GuardUpdateError::Disabled) => {}
         Err(GuardUpdateError::StateUnavailable) => {
             eprintln!("failed to lock app state for nosleep tray action");
