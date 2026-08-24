@@ -56,3 +56,21 @@ pub(crate) fn clear_guard(
 
     Ok(())
 }
+
+pub(crate) fn clear_all_guards(
+    app: &AppHandle,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<(), GuardUpdateError> {
+    let mut state = state
+        .lock()
+        .map_err(|_| GuardUpdateError::StateUnavailable)?;
+    if !state.settings.settings.nosleep_enabled {
+        return Ok(());
+    }
+
+    state.nosleep.active_guards.clear();
+    update_nosleep_tray(app, &[]);
+    sync_sleep_inhibitor(false);
+
+    Ok(())
+}
