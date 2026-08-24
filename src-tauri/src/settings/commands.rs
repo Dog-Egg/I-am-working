@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 
 use crate::app::state::AppState;
-use crate::features::nosleep::commands::sync_nosleep_cli;
 use crate::features::nosleep::inhibitor::stop_sleep_inhibitor;
 use crate::features::nosleep::tray::{create_nosleep_tray, remove_nosleep_tray};
 use crate::features::work_timer::tray::update_tray_title;
@@ -30,15 +29,9 @@ pub(crate) fn update_settings(
 ) -> Result<AppSettings, String> {
     let should_enable_nosleep = settings.nosleep_enabled;
     let was_nosleep_enabled = state.lock().unwrap().settings.settings.nosleep_enabled;
-    if should_enable_nosleep != was_nosleep_enabled {
-        if should_enable_nosleep {
-            sync_nosleep_cli(&app, true)?;
-            if let Err(error) = create_nosleep_tray(&app) {
-                let _ = sync_nosleep_cli(&app, false);
-                return Err(error.to_string());
-            }
-        } else {
-            sync_nosleep_cli(&app, false)?;
+    if should_enable_nosleep && !was_nosleep_enabled {
+        if let Err(error) = create_nosleep_tray(&app) {
+            return Err(error.to_string());
         }
     }
 
@@ -54,14 +47,8 @@ pub(crate) fn update_settings(
     let next_settings = match settings_result {
         Ok(result) => result,
         Err(error) => {
-            if should_enable_nosleep != was_nosleep_enabled {
-                if should_enable_nosleep {
-                    remove_nosleep_tray(&app);
-                    let _ = sync_nosleep_cli(&app, false);
-                } else {
-                    let _ = sync_nosleep_cli(&app, true);
-                    let _ = create_nosleep_tray(&app);
-                }
+            if should_enable_nosleep && !was_nosleep_enabled {
+                remove_nosleep_tray(&app);
             }
             return Err(error);
         }

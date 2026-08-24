@@ -32,7 +32,10 @@ fn set_guard_status(name: &str, active: bool) -> Result<(), String> {
     })
     .map_err(|err| format!("failed to encode nosleep request: {err}"))?;
     let response = send_ipc_request("POST", "/nosleep", Some(&body))?;
-    parse_empty_success_response(&response)
+    if let Some(warning) = parse_success_response(&response)? {
+        eprintln!("iaw: warning: {warning}");
+    }
+    Ok(())
 }
 
 fn send_ipc_request(method: &str, path: &str, body: Option<&str>) -> Result<String, String> {
@@ -128,21 +131,29 @@ fn macos_app_data_dir() -> Result<PathBuf, String> {
     Err("the I Am Working CLI IPC path is only implemented on macOS for now".to_string())
 }
 
-fn parse_empty_success_response(response: &str) -> Result<(), String> {
-    let headers = response
+fn parse_success_response(response: &str) -> Result<Option<String>, String> {
+    let (headers, body) = response
         .split_once("\r\n\r\n")
-        .map(|(headers, _body)| headers)
         .ok_or_else(|| "invalid IPC response".to_string())?;
     let status_line = headers
         .lines()
         .next()
         .ok_or_else(|| "missing IPC status line".to_string())?;
 
-    if !status_line.contains(" 200 ") {
-        return Err(format!("I Am Working returned {status_line}"));
+    if status_line.split_whitespace().nth(1) == Some("200") {
+        let body = body.trim();
+        if body.is_empty() || body == "{}" {
+            return Ok(None);
+        }
+        return Ok(Some(body.to_string()));
     }
 
-    Ok(())
+    let body = body.trim();
+    if !body.is_empty() {
+        return Err(format!("iaw: {body}"));
+    }
+
+    Err(format!("I Am Working returned {status_line}"))
 }
 
 fn usage() -> String {
@@ -184,9 +195,36 @@ mod tests {
     }
 
     #[test]
-    fn parse_empty_success_response_accepts_200() {
+    fn parse_success_response_accepts_empty_200() {
         let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
 
-        assert!(parse_empty_success_response(response).is_ok());
+        assert_eq!(parse_success_response(response), Ok(None));
+    }
+
+    #[test]
+    fn parse_success_response_ignores_empty_json_success_body() {
+        let response = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n{}\n";
+
+        assert_eq!(parse_success_response(response), Ok(None));
+    }
+
+    #[test]
+    fn parse_success_response_returns_warning_body() {
+        let response = "HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\nnosleep is disabled\n";
+
+        assert_eq!(
+            parse_success_response(response),
+            Ok(Some("nosleep is disabled".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_success_response_still_rejects_error_status() {
+        let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 6\r\n\r\nerror\n";
+
+        assert_eq!(
+            parse_success_response(response),
+            Err("iaw: error".to_string())
+        );
     }
 }

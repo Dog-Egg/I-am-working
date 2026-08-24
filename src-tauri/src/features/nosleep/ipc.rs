@@ -11,6 +11,9 @@ use crate::features::nosleep::operation::{update_guard, GuardUpdateError};
 use crate::features::nosleep::state::{adjust_guard_count, sorted_active_guards, ActiveGuards};
 use tauri::AppHandle;
 
+const NOSLEEP_DISABLED_MESSAGE: &str =
+    "nosleep is disabled; enable \"防止系统休眠\" in I Am Working settings\n";
+
 #[derive(Debug, serde::Deserialize)]
 struct NosleepRequest {
     name: String,
@@ -23,8 +26,11 @@ fn apply_guard_status(
     active_guards: &mut ActiveGuards,
     request: &NosleepRequest,
 ) -> Result<Vec<(String, u32)>, &'static str> {
+    if !enabled && request.active {
+        return Err(NOSLEEP_DISABLED_MESSAGE);
+    }
     if !enabled {
-        return Err("nosleep is disabled in settings\n");
+        return Ok(sorted_active_guards(active_guards));
     }
 
     adjust_guard_count(active_guards, &request.name, request.active);
@@ -114,29 +120,24 @@ fn handle_connection(
                     return;
                 }
             };
-            match update_guard(app, state, &request.name, request.active) {
-                Ok(()) => {}
-                Err(GuardUpdateError::Disabled) => {
-                    write_response(
-                        &mut stream,
-                        "409 Conflict",
-                        "text/plain",
-                        "nosleep is disabled in settings\n",
-                    );
-                    return;
-                }
-                Err(GuardUpdateError::StateUnavailable) => {
-                    eprintln!("failed to lock app state for nosleep CLI action");
-                    write_response(
-                        &mut stream,
-                        "500 Internal Server Error",
-                        "text/plain",
-                        "app state is unavailable\n",
-                    );
-                    return;
-                }
-            }
-            write_response(&mut stream, "200 OK", "application/json", "{}\n");
+            let (status, content_type, response_body) =
+                match update_guard(app, state, &request.name, request.active) {
+                    Ok(()) => ("200 OK", "application/json", "{}\n"),
+                    Err(GuardUpdateError::Disabled) => {
+                        ("200 OK", "text/plain", NOSLEEP_DISABLED_MESSAGE)
+                    }
+                    Err(GuardUpdateError::StateUnavailable) => {
+                        eprintln!("failed to lock app state for nosleep CLI action");
+                        write_response(
+                            &mut stream,
+                            "500 Internal Server Error",
+                            "text/plain",
+                            "app state is unavailable\n",
+                        );
+                        return;
+                    }
+                };
+            write_response(&mut stream, status, content_type, response_body);
         }
         _ => {
             write_response(&mut stream, "404 Not Found", "text/plain", "not found\n");
@@ -219,6 +220,21 @@ mod tests {
         };
 
         assert!(apply_guard_status(false, &mut active_guards, &request).is_err());
+        assert!(active_guards.is_empty());
+    }
+
+    #[test]
+    fn guard_status_cleanup_succeeds_when_nosleep_is_disabled() {
+        let mut active_guards = ActiveGuards::new();
+        let request = NosleepRequest {
+            name: "codex".to_string(),
+            active: false,
+        };
+
+        assert_eq!(
+            apply_guard_status(false, &mut active_guards, &request).unwrap(),
+            Vec::new()
+        );
         assert!(active_guards.is_empty());
     }
 

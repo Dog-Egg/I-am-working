@@ -4,17 +4,8 @@ use tauri::AppHandle;
 
 const CLI_INSTALL_PATH: &str = "/usr/local/bin/iaw";
 
-pub(crate) fn sync_nosleep_cli(app: &AppHandle, enabled: bool) -> Result<(), String> {
-    if enabled {
-        install_cli_inner(app)?;
-    } else {
-        uninstall_cli_inner()?;
-    }
-    Ok(())
-}
-
 #[cfg(target_os = "macos")]
-fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn install_cli(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let source =
         std::env::current_exe().map_err(|err| format!("failed to locate app executable: {err}"))?;
     let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
@@ -30,12 +21,12 @@ fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn install_cli_inner(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn install_cli(_app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Err("CLI installation is only implemented on macOS for now".to_string())
 }
 
 #[cfg(target_os = "macos")]
-fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
+pub(crate) fn uninstall_cli() -> Result<std::path::PathBuf, String> {
     let source =
         std::env::current_exe().map_err(|err| format!("failed to locate app executable: {err}"))?;
     let destination = std::path::PathBuf::from(CLI_INSTALL_PATH);
@@ -48,11 +39,6 @@ fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
         }
         Err(err) => Err(err.to_string()),
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn uninstall_cli_inner() -> Result<std::path::PathBuf, String> {
-    Err("CLI uninstallation is only implemented on macOS for now".to_string())
 }
 
 #[cfg(target_os = "macos")]

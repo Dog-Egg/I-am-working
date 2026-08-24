@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use app::state::AppState;
 use app::tray::create_tray;
-use features::nosleep::commands::sync_nosleep_cli;
+use features::nosleep::commands::install_cli;
+#[cfg(target_os = "macos")]
+use features::nosleep::commands::uninstall_cli;
 use features::nosleep::ipc::spawn_cli_ipc_server;
 use features::nosleep::state::NoSleepState;
 use features::work_timer::state::WorkTimerState;
@@ -100,8 +102,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            if let Err(err) = sync_nosleep_cli(app.handle(), settings.nosleep_enabled) {
-                eprintln!("failed to sync nosleep CLI installation: {err}");
+            // The CLI lifetime follows the application, not the nosleep setting.
+            if let Err(err) = install_cli(app.handle()) {
+                eprintln!("failed to install nosleep CLI: {err}");
             }
             create_tray(app, today_work_seconds, &settings)?;
             spawn_cli_ipc_server(app.handle().clone(), app_data_dir, state)?;
@@ -114,6 +117,10 @@ pub fn run() {
         .run(|_app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 features::nosleep::inhibitor::stop_sleep_inhibitor();
+                #[cfg(target_os = "macos")]
+                if let Err(err) = uninstall_cli() {
+                    eprintln!("failed to uninstall nosleep CLI: {err}");
+                }
             }
         });
 }

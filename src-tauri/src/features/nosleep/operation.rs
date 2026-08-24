@@ -22,7 +22,11 @@ pub(crate) fn update_guard(
         .lock()
         .map_err(|_| GuardUpdateError::StateUnavailable)?;
     if !state.settings.settings.nosleep_enabled {
-        return Err(GuardUpdateError::Disabled);
+        if active {
+            return Err(GuardUpdateError::Disabled);
+        }
+        // `off` is idempotent cleanup, even when the feature is disabled.
+        return Ok(());
     }
 
     adjust_guard_count(&mut state.nosleep.active_guards, name, active);
