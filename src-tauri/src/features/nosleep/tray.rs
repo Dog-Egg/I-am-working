@@ -17,12 +17,12 @@ fn tray_menu(app: &AppHandle, active_guards: &[(String, u32)]) -> tauri::Result<
 
     if active_guards.is_empty() {
         let empty_item =
-            MenuItem::with_id(app, "guard-empty", "No active guards", false, None::<&str>)?;
+            MenuItem::with_id(app, "guard-empty", "暂无防休眠守护", false, None::<&str>)?;
         menu.append(&empty_item)?;
         return Ok(menu);
     }
 
-    let title_item = MenuItem::with_id(app, "guard-title", "Active guards", false, None::<&str>)?;
+    let title_item = MenuItem::with_id(app, "guard-title", "防休眠守护", false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     menu.append(&title_item)?;
     menu.append(&separator)?;
