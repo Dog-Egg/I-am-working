@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{
     include_image,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -62,10 +62,14 @@ pub(crate) fn create_tray(
     settings: &AppSettings,
 ) -> tauri::Result<()> {
     let stats_item = MenuItem::with_id(app, "stats", "统计", true, None::<&str>)?;
-    let log_item = MenuItem::with_id(app, "log", "查看日志", true, None::<&str>)?;
+    let log_item = MenuItem::with_id(app, "log", "日志", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&stats_item, &settings_item, &log_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[&stats_item, &settings_item, &log_item, &separator, &quit_item],
+    )?;
 
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(include_image!("./icons/icon.png"))
