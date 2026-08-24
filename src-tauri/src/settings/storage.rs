@@ -1,5 +1,6 @@
 use std::path::Path;
 
+#[cfg(debug_assertions)]
 use chrono::Local;
 
 use super::models::{AppSettings, TrayTimeFormat};

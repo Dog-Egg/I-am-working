@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(debug_assertions)]
 use chrono::Local;
 use rusqlite::{params, Connection};
 use tauri::{App, Manager};

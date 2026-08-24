@@ -85,9 +85,9 @@ pub fn run() {
                 eprintln!("failed to load app settings: {_err}");
                 default_settings()
             });
-            if let Err(err) = sync_launch_at_login(app.handle(), settings.launch_at_login) {
+            if let Err(_err) = sync_launch_at_login(app.handle(), settings.launch_at_login) {
                 #[cfg(debug_assertions)]
-                eprintln!("failed to sync launch at login: {err}");
+                eprintln!("failed to sync launch at login: {_err}");
                 refresh_launch_at_login(app.handle(), &mut settings);
             }
             let state = Arc::new(Mutex::new(AppState {
